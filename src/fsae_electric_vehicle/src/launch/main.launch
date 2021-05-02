@@ -4,6 +4,7 @@
   <node pkg="fsae_electric_vehicle" type="Brakes" name="Brakes"/>
   <node pkg="fsae_electric_vehicle" type="CoolantTemp" name="CoolantTemp"/>
   <node pkg="fsae_electric_vehicle" type="DriveTrain" name="DriveTrain"/>
+  <node pkg="fsae_electric_vehicle" type="Suspension" name="Suspension"/>
   <node pkg="fsae_electric_vehicle" type="SocketIOSender" name="SocketIOSender"/>
   <node pkg="fsae_electric_vehicle" type="gps_lap_timer" name="gps_lap_timer"/>
   <!--<node pkg="fsae_electric_vehicle" type="reader.py" name="READER" output="screen"/>-->

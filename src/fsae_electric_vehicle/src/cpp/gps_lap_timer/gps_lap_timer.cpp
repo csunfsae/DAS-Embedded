@@ -89,6 +89,16 @@ int main(int argc, char **argv)
 				gps_lap_timer.speed = atof(gpsTokens[7]);
 				gps_lap_timer.heading = atof(gpsTokens[8]);
 				gps_lap_timer.magneticVariation = atof(gpsTokens[11]);
+				//
+				
+				/*Testing data to be sent to SocketIOSender
+				gps_lap_timer.time = 32;
+				gps_lap_timer.latitude = 34;
+				gps_lap_timer.longitude = 55;
+				gps_lap_timer.speed = 66;
+				gps_lap_timer.heading = 11;
+				gps_lap_timer.magneticVariation = 31;
+				*/
 				gps_lap_timer_pub.publish(gps_lap_timer);
 			}
 		} else {

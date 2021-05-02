@@ -73,10 +73,15 @@ target_link_libraries(SocketIOSender ${catkin_LIBRARIES} ${PROJECT_NAME} )
 target_compile_features(SocketIOSender PUBLIC cxx_std_17)
 add_dependencies(SocketIOSender fsae_electric_vehicle_generate_messages_cpp)
 
-add_executable(SPEEDOMETER src/cpp/speedometer/main.cpp)
+add_executable(SPEEDOMETER src/cpp/speedometer/main.cpp src/cpp/speedometer/CANController.cpp)
 target_link_libraries(SPEEDOMETER ${catkin_LIBRARIES})
 target_compile_features(SPEEDOMETER PUBLIC cxx_std_17)
 add_dependencies(SPEEDOMETER fsae_electric_vehicle_generate_messages_cpp)
+
+add_executable(Suspension src/cpp/suspension/main.cpp src/cpp/suspension/CANController.cpp)
+target_link_libraries(Suspension ${catkin_LIBRARIES})
+target_compile_features(Suspension PUBLIC cxx_std_17)
+add_dependencies(Suspension fsae_electric_vehicle_generate_messages_cpp)
 
 add_executable(gps_lap_timer src/cpp/gps_lap_timer/gps_lap_timer.cpp src/cpp/gps_lap_timer/GPSUtilities.cpp src/cpp/gps_lap_timer/CANController.cpp)
 target_link_libraries(gps_lap_timer ${catkin_LIBRARIES})
@@ -121,6 +126,10 @@ install(TARGETS CoolantTemp
 )
 
 install(TARGETS DriveTrain
+  RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
+)
+
+install(TARGETS Suspension
   RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 
