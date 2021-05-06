@@ -5,20 +5,21 @@
 #include "fsae_electric_vehicle/brake_pressure.h"
 #include "fsae_electric_vehicle/coolant.h"
 #include "fsae_electric_vehicle/drive_train.h"
+#include "fsae_electric_vehicle/suspension.h"
 #include "fsae_electric_vehicle/gps.h"
-#include "/home/nvidia/Desktop/formulaEmbedded/src/fsae_electric_vehicle/socket.io-client-cpp/src/sio_client.h" //Change to directory where the header file is at or it won't compile. Seth & Faizan you can add your include that is specific to your computers directory, just make sure all of the other includes for sio_client.h are commented out.
-//#include <sio_client.h>
+//#include "/home/nvidia/Desktop/formulaEmbedded/src/fsae_electric_vehicle/socket.io-client-cpp/src/sio_client.h" //Change to directory where the header file is at or it won't compile. Seth & Faizan you can add your include that is specific to your computers directory, just make sure all of the other includes for sio_client.h are commented out.
+#include <sio_client.h>
 //#include "/home/btc54/Desktop/formulaEmbedded/src/fsae_electric_vehicle/socket.io-client-cpp/src/sio_client.h" 
 #include <string>
 #include <mutex>
 //#include <socket.io-client-cpp/src/sio_client.h>
 //#include "fsae_electric_vehicle/sio_client.h"
 
-  //std::string speedVal;
-  float speedVal;
-  float driveTrain;
-  float coolantTemp;
-  float brakePressure;
+  float speedVal, driveTrain, coolantTemp, brakePressure;
+  
+  float suspFrontLeft, suspFrontRight, suspRearLeft, suspRearRight;
+  
+  float gpsTime, gpsLat, gpsLon, gpsSpeed, gpsHeading, gpsMagVar;
   
   std::mutex dataMutex;
 
@@ -28,7 +29,13 @@
  }
   
   void gpsCallback(const fsae_electric_vehicle::gps::ConstPtr& msg) {
-	//std::lock_guard<std::mutex> lock{dataMutex};
+	std::lock_guard<std::mutex> lock{dataMutex};
+	memcpy(&gpsTime, &msg->time, sizeof(speedVal)+1);
+	memcpy(&gpsLat, &msg->latitude, sizeof(speedVal)+1);
+	memcpy(&gpsLon, &msg->longitude, sizeof(speedVal)+1);
+	memcpy(&gpsSpeed, &msg->speed, sizeof(speedVal)+1);
+	memcpy(&gpsHeading, &msg->heading, sizeof(speedVal)+1);
+	memcpy(&gpsMagVar, &msg->magneticVariation, sizeof(speedVal)+1);
  }
 
  void brakeCallback(const fsae_electric_vehicle::brake_pressure::ConstPtr& msg) {
@@ -45,6 +52,14 @@
 	std::lock_guard<std::mutex> lock{dataMutex};
  	memcpy(&driveTrain, &msg->voltage, sizeof(speedVal)+1);
  }
+ 
+  void suspensionCallback(const fsae_electric_vehicle::suspension::ConstPtr& msg) {
+	std::lock_guard<std::mutex> lock{dataMutex};
+ 	memcpy(&suspFrontLeft, &msg->frontLeft, sizeof(speedVal)+1);
+ 	memcpy(&suspFrontRight, &msg->frontRight, sizeof(speedVal)+1);
+ 	memcpy(&suspRearLeft, &msg->rearLeft, sizeof(speedVal)+1);
+ 	memcpy(&suspRearRight, &msg->rearRight, sizeof(speedVal)+1);
+ }
 
 int main(int argc, char **argv) {
 
@@ -60,10 +75,11 @@ int main(int argc, char **argv) {
   
 
   ros::Subscriber speed = n.subscribe<fsae_electric_vehicle::speedometer>("speedometer", 1000, speedCallback);
-  ros::Subscriber gps = n.subscribe<fsae_electric_vehicle::gps>("GPS", 1000, gpsCallback);
+  ros::Subscriber gps = n.subscribe<fsae_electric_vehicle::gps>("gps_lap_timer", 1000, gpsCallback);
   ros::Subscriber bat = n.subscribe<fsae_electric_vehicle::drive_train>("drivetrain_voltage", 1000, batteryCallback);
   ros::Subscriber cool = n.subscribe<fsae_electric_vehicle::coolant>("coolant_temperature", 1000, coolantCallback);
   ros::Subscriber brake = n.subscribe<fsae_electric_vehicle::brake_pressure>("brake_pressure", 1000, brakeCallback);
+  ros::Subscriber susp = n.subscribe<fsae_electric_vehicle::suspension>("suspension", 1000, suspensionCallback);
   
 
   
@@ -73,16 +89,23 @@ int main(int argc, char **argv) {
 
   while (ros::ok()) {
     ros::spinOnce();
-    sio::message::list speedData(std::to_string(speedVal));
-    sio::message::list brakeData(std::to_string(brakePressure));
-    sio::message::list coolantData(std::to_string(coolantTemp));
-    sio::message::list batteryData(std::to_string(driveTrain));
+
+    h.socket()->emit("speedometer", sio::double_message::create(speedVal));
+    h.socket()->emit("driveTrain", sio::double_message::create(brakePressure));
+    h.socket()->emit("coolantTemp", sio::double_message::create(coolantTemp));
+    h.socket()->emit("brakePressure", sio::double_message::create(driveTrain));
     
-    h.socket()->emit("speedometer", speedData);
-    h.socket()->emit("driveTrain", batteryData);
-    h.socket()->emit("coolantTemp", coolantData);
-    h.socket()->emit("brakePressure", brakeData);
+    h.socket()->emit("suspFrontLeft", sio::double_message::create(suspFrontLeft));
+    h.socket()->emit("suspFrontRight", sio::double_message::create(suspFrontRight));
+    h.socket()->emit("suspRearLeft", sio::double_message::create(suspRearLeft));
+    h.socket()->emit("suspRearRight", sio::double_message::create(suspRearRight));
     
+    h.socket()->emit("gpsTime", sio::double_message::create(gpsTime));
+    h.socket()->emit("gpsLat", sio::double_message::create(gpsLat));
+    h.socket()->emit("gpsLon", sio::double_message::create(gpsLon));
+    h.socket()->emit("gpsSpeed", sio::double_message::create(gpsSpeed));
+    h.socket()->emit("gpsHeading", sio::double_message::create(gpsHeading));
+    h.socket()->emit("gpsMagVar", sio::double_message::create(gpsMagVar));
     
     
     loop_rate.sleep();
