@@ -41,9 +41,9 @@ Adafruit_GPS GPS2(&GPSSerial2);
 // ----------------------------------------------------------------------------------------------------
 void setup(void)
 {
+  Serial.begin(9600);      // Initiate serial ports with baud rate of 9600
   Serial.println("Adafruit GPS basic test!");
   pinMode(ledPin, OUTPUT); // Set the digital pin as output
-  Serial.begin(9600);      // Initiate serial ports with baud rate of 9600
   canbus.begin();          
   canbus.setBaudRate(500000); // This value has to match the baud rate on the Quasar/Jetson TX2 board
   
@@ -142,7 +142,7 @@ void loop(void) {
   canMsg.buf[7] = 7; // Angle is mentioned as course in Adafruit lib header files
 
   //canbus.read(canMsg); // CANBUS pin will read the canMst struct just populated with data  
-  canSniff(); // Print out the data contained in canMsg
+  //canSniff(); // Print out the data contained in canMsg
   canbus.write(canMsg); // CANBUS pin will send CANBUS packet
 
   // Populate CANBUS sruct with GPS2 data that we want to send
