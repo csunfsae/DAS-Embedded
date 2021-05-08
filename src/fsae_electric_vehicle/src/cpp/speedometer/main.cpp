@@ -9,7 +9,7 @@ int main(int argc, char **argv) {
   fsae_electric_vehicle::speedometer speedometer;
 
   ros::Rate loop_rate{30};
-  std::cout << "Init!" << std::endl;
+  std::cout << "Speedometer Init!" << std::endl;
 
   float x = 0;
 

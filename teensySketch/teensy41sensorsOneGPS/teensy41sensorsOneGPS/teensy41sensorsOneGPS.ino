@@ -16,6 +16,9 @@
 /*!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
  * The problem with this is that it prints out chars that alternate from GPS1 and GPS2
  *  Example: ,$4G8P,G1S6V0,,33,03,,1152,,4143,,12043,,03618,,2461,,2186,,22803,,34120,,1204,,2065,,21287,,04415*,7253,
+ *  
+ *  Cannot send CAN frames via canbus header on teensy. GPS Teensy will stop displaying GPS data via serial console
+ *  when 'CAN2' is used 
  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!*/
 
 #include <FlexCAN_T4.h>    // FlexCan library for Teensy 4.0 and 4.1
@@ -24,8 +27,7 @@
 // Set GPSECHO to 'false' to turn off echoing the GPS data to the arduino Serial console
 // Set to 'true' if you want to debug and listen to the raw GPS sentences
 #define GPSECHO true
-#define GPSSerial1 Serial1 // Hardware serial ports on Teensy 4.1
-#define GPSSerial2 Serial2
+#define GPSSerial2 Serial2 // Hardware serial ports on Teensy 4.1
 
 static CAN_message_t canMsg;            // Structure of a CANBUS message that is sent over Teensy CANBUS port
 const int ledPin =  LED_BUILTIN;        // The pin number for LED
@@ -35,11 +37,10 @@ unsigned long previousMillis = 0;       // Will store last time the Teensy LED w
 uint32_t gpsTimer = millis();           // Used for printing GPS data to serial console once per unit of time
 const long interval = 1000;             // Interval at which to blink LED on Teensy (milliseconds)
 
-FlexCAN_T4<CAN3, RX_SIZE_256, TX_SIZE_16> canbus; /* CAN2 is Teensy4.1 pins 0 & 1.
+FlexCAN_T4<CAN2, RX_SIZE_256, TX_SIZE_16> canbus; /* CAN2 is Teensy4.1 pins 0 & 1.
                                                      CAN3 pins support regular CAN2.0 and CANFD modes */
 
-Adafruit_GPS GPS(&GPSSerial1);      // Connect to the GPS units on separate hardware serial ports
-Adafruit_GPS GPS2(&GPSSerial2);
+Adafruit_GPS GPS(&GPSSerial2);      // Connect to the GPS units on separate hardware serial ports
 
 
 
@@ -51,27 +52,25 @@ void setup(void)
   pinMode(ledPin, OUTPUT); // Set the digital pin as output
   canbus.begin();          
   canbus.setBaudRate(500000); // This value has to match the baud rate on the Quasar/Jetson TX2 board
+  //canbus.setRX(ALT);
+  //canbus.setTX(ALT);
   
   GPS.begin(9600); // 9600 NMEA is the default baud rate for Adafruit MTK GPS's- some use 4800
-  GPS2.begin(9600);
 
   // Uncomment this line to turn on RMC (recommended minimum) and GGA (fix data) including altitude
   //GPS.sendCommand(PMTK_SET_NMEA_OUTPUT_RMCGGA);
   // Uncomment this line to turn on only the "minimum recommended" data
   GPS.sendCommand(PMTK_SET_NMEA_OUTPUT_RMCONLY);
-  GPS2.sendCommand(PMTK_SET_NMEA_OUTPUT_RMCONLY);
   // For parsing data, we don't suggest using anything but either RMC only or RMC+GGA since
   // the parser doesn't care about other sentences at this time
 
   // Set the GPS update rate
   GPS.sendCommand(PMTK_SET_NMEA_UPDATE_1HZ);   // 1 Hz update rate
-  GPS2.sendCommand(PMTK_SET_NMEA_UPDATE_1HZ);
   // For the parsing code to work nicely and have time to sort thru the data, and
   // print it out we don't suggest using anything higher than 1 Hz
 
   // Request updates on antenna status, comment out to keep quiet
   GPS.sendCommand(PGCMD_ANTENNA);
-  GPS2.sendCommand(PGCMD_ANTENNA);
 }
 
 
@@ -98,9 +97,6 @@ void loop(void) {
   char c = GPS.read();
   if ((c) && (GPSECHO))
     Serial.write(c);
-  c = GPS2.read();
-  if ((c) && (GPSECHO))
-    Serial.write(c);
 
   // If a sentence is received, we can check the checksum, parse it...
   if (GPS.newNMEAreceived()) {
@@ -111,29 +107,19 @@ void loop(void) {
     if (!GPS.parse(GPS.lastNMEA()))   // This also sets the newNMEAreceived() flag to false
       return;  // We can fail to parse a sentence in which case we should just wait for another
   }
-  if (GPS2.newNMEAreceived()) {
-    Serial.println("NMEA has been received on GPS2!");
-    // a tricky thing here is if we print the NMEA sentence, or data
-    // we end up not listening and catching other sentences!
-    // so be very wary if using OUTPUT_ALLDATA and trytng to print out data
-    if (!GPS2.parse(GPS2.lastNMEA()))   // This also sets the newNMEAreceived() flag to false
-      return;  // We can fail to parse a sentence in which case we should just wait for another
-  }
 
   // Approximately every 2 seconds or so, print out the current GPS stats
   if (millis() - gpsTimer > 2000) {
     gpsTimer = millis(); // reset the timer
     int gpsNum = 1;
     printGPSStats(GPS, gpsNum);
-    gpsNum = 2;
-    printGPSStats(GPS2, gpsNum);
   }
 
   // Populate CANBUS struct with GPS1 data that we want to send
   //populateCanbusStruct(GPS);
-  canMsg.flags.extended = 0; // = random(0,2);
+  canMsg.flags.extended = random(0,2);
   canMsg.flags.remote = 0;
-  canMsg.len = 8;
+  //canMsg.len = 8;
   canMsg.id = 0x34;
   canMsg.buf[0] = 0;
   canMsg.buf[1] = 1;
@@ -144,7 +130,7 @@ void loop(void) {
   canMsg.buf[6] = 6; 
   canMsg.buf[7] = 7; // Angle is mentioned as course in Adafruit lib header files
 
-  //canbus.read(canMsg); // CANBUS pin will read the canMst struct just populated with data  
+  canbus.read(canMsg); // CANBUS pin will read the canMsg struct just populated with data  
   //canSniff(); // Print out the data contained in canMsg
   canbus.write(canMsg); // CANBUS pin will send CANBUS packet
 
@@ -157,7 +143,6 @@ void loop(void) {
   // This is the output of the can frame displayed in the serial monitor
   // MB 0  OVERRUN: 0  LEN: 8 EXT: 0 TS: 0 ID: 34 Buffer: 4 6 28 58 47 0 0 3E
 }
-
 
 
 void populateCanbusStruct(Adafruit_GPS GPS) {
