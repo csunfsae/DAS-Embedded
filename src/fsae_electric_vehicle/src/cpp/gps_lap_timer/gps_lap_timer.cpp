@@ -47,24 +47,21 @@ int main(int argc, char **argv)
 	CANController can; 
 	can.start("can0");
 
- 	char* gpsTokens[RMC_CHECKSUM + 1]; // Pointer to GPS RMC (string) fields
-	//float data[8] = {0.0, 0, 0, 0, 0, 0, 0, 0};
-	CANData data;
+	CANData canbusFrame; // Struct to hold the data received on the CANBUS header
 
-	/********** Maybe replace this while loop with a function that waits to save cpu cycles***********/
 	// Wait for GPS fix
-	do {
-		readCanbusData(can);
+	do { // Maybe replace this while loop with a function that waits to save cpu cycles
+		readCanbusData(can, &canbusFrame);
 		ROS_DEBUG("Waiting for GPS fix!\n");
 		std::cout << "Waiting for GPS fix! c\n" << std::endl;
-		std::cin.get();
-	} while (data.data[3] == 0);
+	} while (canbusFrame.data[3] == 0);
 	std::cout << "\nGPS Found Fiix!";
 	
 	// Establish StartLine
 	float ts;
-	if (readCanbusData(can))
-		ts = EstablishStartLine(gpsTokens);
+	if (readCanbusData(can, &canbusFrame)) {
+		//ts = EstablishStartLine(&canbusFrame);
+	}
 	else {
 		error.SetError(err::ID::BAD_SENTENCE);
 		ROS_FATAL("Cannot establish startline due to GetRMCSentence\n");
@@ -75,28 +72,22 @@ int main(int argc, char **argv)
 	ros::Rate loop_rate(30); // This means that loop rate can be up to 30 times per second
   	while (ros::ok()) {
 		ROS_INFO_ONCE("ROS is ok!");
-		if (readCanbusData(can)) { // Receive GPS data from file or from CANBUS
+		if (readCanbusData(can, &canbusFrame)) { // Receive GPS data from file or from CANBUS
 			if (ts != 0.0f) {
-				Run(ts, gpsTokens);
+				//Run(ts, gpsTokens);
 
 				// Store GPS data 
-				gps_lap_timer.hours = data.data[0];
-				gps_lap_timer.minutes = data.data[1];
-				gps_lap_timer.seconds = data.data[2];
-				gps_lap_timer.fix = data.data[3];
-				gps_lap_timer.latitude = data.data[4];
-				gps_lap_timer.longitude = data.data[5];
-				gps_lap_timer.speed = data.data[6];
-				gps_lap_timer.heading = data.data[7];
-				
-				/*Testing data to be sent to SocketIOSender
-				gps_lap_timer.time = 32;
-				gps_lap_timer.latitude = 34;
-				gps_lap_timer.longitude = 55;
-				gps_lap_timer.speed = 66;
-				gps_lap_timer.heading = 11;
-				gps_lap_timer.magneticVariation = 31;
-				*/
+				gps_lap_timer.hours = canbusFrame.data[0];
+				gps_lap_timer.minutes = canbusFrame.data[1];
+				gps_lap_timer.seconds = canbusFrame.data[2];
+				gps_lap_timer.fix = canbusFrame.data[3];
+				//gps_lap_timer.latitude = canbusFrame.data[4];
+				//gps_lap_timer.longitude = canbusFrame.data[5];
+				gps_lap_timer.speed = canbusFrame.data[4];
+				gps_lap_timer.heading = canbusFrame.data[5] & canbusFrame.data[6]; // This may cause gps_lap_timer.heading to be read wrong since its not a uint16_t
+
+				canbusFrame.data[3] = 0; // Mark frame as sent (used in readCanbusData())
+
 				gps_lap_timer_pub.publish(gps_lap_timer);
 			}
 		} else {
@@ -109,161 +100,59 @@ int main(int argc, char **argv)
     	ros::spinOnce();
    		loop_rate.sleep();
   	}
-
-#ifdef FILE_INPUT // Close file
-	if (file)
-		fclose(file);
-#endif
-
 }
 
 
 
-static bool readCanbusData(CANController &can) {
-	float hours = 0, minutes = 0, seconds = 0, fix = 0, latitude = 0, longitude = 0, speed = 0;
-	uint8_t heading = 0;
-	//CANController can; 
-	//can.start("can0");
-	//std::cin.get();
-	auto data = can.getData(0x34, 0x1FFFFFFF); // First param is idFilter, 2nd is idMask
-	if (data.has_value()) {
-		//std::memcpy(&buffer, data->data, RMC_CHECKSUM + 1); //
-		hours = data->data[0]; // May be able to combine 'hours' 'minutes' & 'seconds' into just 'seconds' later on
-		minutes = data->data[1];
-		seconds = data->data[2];
-		fix = data->data[3];
-		//latitude = data->data[4];
-		//longitude = data->data[5];
-		speed = data->data[4];
-		heading = data->data[7];
-	} else {
+static bool readCanbusData(CANController &can, CANData* canbusFrame) {
+	//float hours = 0, minutes = 0, seconds = 0, fix = 0, latitude = 0, longitude = 0, speed = 0;
+	//uint16_t heading = 0;
+	std::optional<CANData> canData = can.getData(0x34, 0x1FFFFFFF); // First param is idFilter, 2nd is idMask.
+																		// This above line will always return data because the GPS has a fix
+	if (canData->data[3] == 0)
 		return false;
-	}
+
+	canbusFrame->data[0] = canData->data[0];
+	canbusFrame->data[1] = canData->data[1];
+	canbusFrame->data[2] = canData->data[2];
+	canbusFrame->data[3] = canData->data[3];
+	canbusFrame->data[4] = canData->data[4];
+	canbusFrame->data[5] = canData->data[5];
+	canbusFrame->data[6] = canData->data[6];
 	return true;
 }
 
 
-// An RMC sentence is a standardized string of chars emitted by GPS units
-static bool GetRMCSentence(char* tokens[]) {
-	error.Clear();
-
-#ifdef FILE_INPUT
-	std::cout << "before fgets func";
-	if (fgets(buffer, GPS_STRING_LENGTH, file) == NULL) {
-		std::cout << "Cannot read file into buffer. Func = GetRMCSentence(). File = gps.h----\n";
-	}
-	//if (fgets(buffer, GPS_STRING_LENGTH, file) == NULL)
-	//{
-		//std::cout << "In fgets";
-		//error.SetError(err::ID::FILE_EOF);
-		//return false;
-	//}
-#else
-	float seconds = 0, latitude = 0, longitude = 0, speed = 0, magneticVar = 0, trueCourse = 0;
-	//std::cin.get();
-	CANController can; // Start the CABUS header on the Jetson/Quasar board
-	can.start("can0");
-	auto data = can.getData(0x34, 0x1FFFFFFF); // First param is idFilter
-	if (data.has_value()) {
-		//std::memcpy(&buffer, data->data, RMC_CHECKSUM + 1); //
-		seconds = data->data[0]; // 'seconds' can be later converted into hours:minutes:seconds later if needed
-		latitude = data->data[1];
-		longitude = data->data[2];
-		speed = data->data[3];
-		magneticVar = data->data[4];
-		trueCourse= data->data[5];
-	} else {
-		return false;
-	}
-	
-	//Apply conversions below and store to buffer
-	
-	
-	
-	
-#endif
-
-	// RMC sentence?
-	if (strncmp("$GPRMC", buffer, 6) == 0)
-	{
-		// Terminate sentence at eol.
-		char* eol = strchr(buffer, 0x0a);
-		if (eol != NULL)
-#ifdef FILE_INPUT
-			buffer[eol - buffer] = 0;
-#else
-			buffer[eol - buffer - 1] = 0;
-#endif
-
-		// Confirm crc.
-		if (!Checksum(buffer))
-		{
-			error.SetError(err::ID::CHECKSUM);
-			ROS_FATAL("CRC not confirmed!");
-			ROS_DEBUG("CRC not confirmed!");
-			return false;
-		}
-
-		// Parse the GPS RMC string and check for valid fix.
-		if (ParseRMC(buffer, tokens) == RMC_CHECKSUM) {
-			if (tokens[RMC_STATUS] == nullptr || *tokens[RMC_STATUS] != 'A') {
-				error.SetError(err::ID::NO_FIX);
-				ROS_DEBUG("GPS has no fix");
-				return false;
-			}
-			else
-				return true;
-		}
-	}
-
-	error.SetError(err::ID::BAD_SENTENCE);
-	ROS_DEBUG("Not an RMC sentence!");
-	return false;
-}
-
-
-
-static float EstablishStartLine(char *tokens[]) {
+/*
+static float EstablishStartLine(CANData* canbusFrame) {
 	float ts;
 
-#ifdef FILE_INPUT
-	// Safeway parking lot: $GPRMC,194924.80,A,3203.02116,N,11042.41425,W,1.304,30.95,120120,,,A*48
-	startPoint.x = (float)32.0302116;
-	startPoint.y = (float)110.4241425;
-	// Heading while crossing start/finish.
-	startHeading = 31;
-	// Position timestamp.
-	char t[] = "194924.80";
-	ts = ConvertToSeconds(t);
-#else
-	if (tokens[RMC_TIME] == nullptr || tokens[RMC_TRACK] == nullptr ||
-	    tokens[RMC_LATITUDE] == nullptr || tokens[RMC_LONGITUDE] == nullptr)
+	if (canbusFrame->data[RMC_FIX] == 0)
 		return 0.0f;
 
-	// Position timestamp.
-	ts = ConvertToSeconds(tokens[RMC_TIME]);
+	// Position timestamp
+	ts = ConvertToSeconds(canbusFrame->data[RMC_HOUR]);
 
-	// Get current track position (lat, long).
+	// Get current track position (lat, long)
 	char temp[12];
-	GeoCopy(tokens[RMC_LATITUDE], temp, LATITUDE);
+	GeoCopy(canbusFrame->data[RMC_LATITUDE], temp, LATITUDE);
 	startPoint.x = atof_(temp);
-	GeoCopy(tokens[RMC_LONGITUDE], temp, LONGITUDE);
+	GeoCopy(canbusFrame->data[RMC_LONGITUDE], temp, LONGITUDE);
 	startPoint.y = atof_(temp);
 
-	// Heading while crossing start/finish.
+	// Heading while crossing start/finish
 	startHeading = atoi(tokens[RMC_TRACK]);
-#endif
 
-	// Define startline.
+	// Define startline
 	StartLine((float)startPoint.x, (float)startPoint.y, (float)startHeading);
 	track.p0.x = startPoint.x;
 	track.p0.y = startPoint.y;
 
 	return ts;
-}
+}*/
 
 
-
+/*
 static void Run(float timeStamp, char *tokens[]) {
 	// Lap counters.
 	uint8_t numLaps = 0;
@@ -352,7 +241,7 @@ static void Run(float timeStamp, char *tokens[]) {
 	// Prepare for next iteration.
 	track.p0.x = track.p1.x;
 	track.p0.y = track.p1.y;
-}
+}*/
 
 
 
@@ -637,7 +526,7 @@ static void Prepend(char* d, const char* s) {
 }
 
 
-
+/*
 // Parse GPS string into tokens
 static size_t ParseRMC(char* sentence, char* tokens[]) {
 	assert(sentence != nullptr);
@@ -649,7 +538,7 @@ static size_t ParseRMC(char* sentence, char* tokens[]) {
 		tokens[++n] = strtok_(NULL, ",*");
 
 	return n;
-}
+}*/
 
 
 
@@ -705,8 +594,7 @@ static void DisplayTime(const uint8_t n, const float ft) {
 
 
 /***************************************************** TODO **********************************************************************/
-// Should be able to start & end racing sessions
-// Reading data from CANBUS doesnt work. Thats in gps.h in GetRMCSentence()
+// Should be able to start & end racing session
 // Test and debug this program while connected to Jetson and CANBUS
 // Vehicle data should be stored locally on the Quasar if there is no connection to the server
 
@@ -743,3 +631,64 @@ std::array<unsigned char, 32> gpsBaud19200 = { "$PUBX,41,1,0007,0003,19200,0*25"
 	SendData(p, &gpsUpdateRate[0], gpsUpdateRate.size()); // Set update rate at 5Hz.
 	//SendData(p, &gpsBaud19200[0], gpsBaud19200.size()); // Set 19200 baud rate.
 }*/
+
+/*
+// An RMC sentence is a standardized string of chars emitted by GPS units
+static bool GetRMCSentence(char* tokens[]) {
+	error.Clear();
+
+	float seconds = 0, latitude = 0, longitude = 0, speed = 0, magneticVar = 0, trueCourse = 0;
+	//std::cin.get();
+	CANController can; // Start the CABUS header on the Jetson/Quasar board
+	can.start("can0");
+	auto data = can.getData(0x34, 0x1FFFFFFF); // First param is idFilter
+	if (data.has_value()) {
+		//std::memcpy(&buffer, data->data, RMC_CHECKSUM + 1); //
+		seconds = data->data[0]; // 'seconds' can be later converted into hours:minutes:seconds later if needed
+		latitude = data->data[1];
+		longitude = data->data[2];
+		speed = data->data[3];
+		magneticVar = data->data[4];
+		trueCourse= data->data[5];
+	} else {
+		return false;
+	}
+
+	// RMC sentence?
+	if (strncmp("$GPRMC", buffer, 6) == 0)
+	{
+		// Terminate sentence at eol.
+		char* eol = strchr(buffer, 0x0a);
+		if (eol != NULL)
+#ifdef FILE_INPUT
+			buffer[eol - buffer] = 0;
+#else
+			buffer[eol - buffer - 1] = 0;
+#endif
+
+		// Confirm crc.
+		if (!Checksum(buffer))
+		{
+			error.SetError(err::ID::CHECKSUM);
+			ROS_FATAL("CRC not confirmed!");
+			ROS_DEBUG("CRC not confirmed!");
+			return false;
+		}
+
+		// Parse the GPS RMC string and check for valid fix.
+		if (ParseRMC(buffer, tokens) == RMC_CHECKSUM) {
+			if (tokens[RMC_STATUS] == nullptr || *tokens[RMC_STATUS] != 'A') {
+				error.SetError(err::ID::NO_FIX);
+				ROS_DEBUG("GPS has no fix");
+				return false;
+			}
+			else
+				return true;
+		}
+	}
+
+	error.SetError(err::ID::BAD_SENTENCE);
+	ROS_DEBUG("Not an RMC sentence!");
+	return false;
+}
+*/

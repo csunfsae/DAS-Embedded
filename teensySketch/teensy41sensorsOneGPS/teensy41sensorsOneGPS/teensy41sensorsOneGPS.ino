@@ -112,7 +112,7 @@ void loop(void) {
 
   // Approximately every 2 seconds or so, print out the current GPS stats
   if (millis() - gpsTimer > 2000) {
-    gpsTimer = millis(); // reset the timer
+    gpsTimer = millis(); // Reset the timer
     int gpsNum = 1;
     printGPSStats(GPS, gpsNum);
   }
@@ -123,7 +123,7 @@ void loop(void) {
   // Populate CANBUS struct with GPS1 data that we want to send
   fillCanbusFrameOne(GPS);
   canbus.read(canMsg); // CANBUS pin will read the canMsg struct just populated with data  
-  //canSniff(); // Print out the data contained in canMsg
+  //canSniff(); // Print out the data contained in canMsg to the arduino serial console
   canbus.write(canMsg); // CANBUS pin will send CANBUS packet
 
   
@@ -141,8 +141,8 @@ void loop(void) {
 void fillCanbusFrameOne(Adafruit_GPS GPS) {
   // Split gpsAngle binary number into 2 separate bytes
   uint16_t gpsAngle = GPS.angle; // 'angle' is mentioned as 'course' in Adafruit lib header files
-  uint8_t angleLeftByte = (uint8_t)gpsAngle; 
-  uint8_t angleRightByte = (uint8_t)(gpsAngle >> 8);
+  uint8_t angleByteTwo = (uint8_t)gpsAngle; // Store bytes in big endian format
+  uint8_t angleByteOne = (uint8_t)(gpsAngle >> 8);
   
   canMsg.flags.extended = 0;
   canMsg.flags.remote = 0;
@@ -152,8 +152,8 @@ void fillCanbusFrameOne(Adafruit_GPS GPS) {
   canMsg.buf[2] = GPS.seconds;
   canMsg.buf[3] = GPS.fix;
   canMsg.buf[4] = GPS.speed; 
-  canMsg.buf[5] = angleLeftByte; // This is little endian format
-  canMsg.buf[6] = angleRightByte;
+  canMsg.buf[5] = angleByteOne; // This is big endian format
+  canMsg.buf[6] = angleByteTwo;
   //canMsg.buf[7] = Room for one more byte here
 }
 

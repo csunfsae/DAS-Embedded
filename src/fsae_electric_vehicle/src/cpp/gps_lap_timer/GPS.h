@@ -15,20 +15,15 @@
 #define D_TO_RADIANS                  (PI/180.0f)
 
 // GPS RMC sentence fields.
-#define RMC_PREFIX                    0
-#define RMC_TIME                      1
-#define RMC_STATUS                    2
-#define RMC_LATITUDE                  3
-#define RMC_LATITUDE_PREFIX           4
-#define RMC_LONGITUDE                 5
-#define RMC_LONGITUDE_PREFIX          6
-#define RMC_SPEED                     7
-#define RMC_TRACK                     8
-#define RMC_DATE                      9
-#define RMC_MAGNETIC_VARIATION        10
-#define RMC_MAGNETIC_VARIATION_PREFIX 11
-#define RMC_FAA_MODE_INDICATOR        12
-#define RMC_CHECKSUM                  13
+#define RMC_HOUR                      0
+#define RMC_MINUTES					  1
+#define RMC_SECONDS					  2
+#define RMC_FIX                       3
+#define RMC_SPEED                     4
+#define RMC_HEADING                   6
+
+#define RMC_LATITUDE                  0
+#define RMC_LONGITUDE                 4
 
 #define LATITUDE                      0x01
 #define LONGITUDE                     0x02
@@ -42,7 +37,7 @@ static float Distance(const point_t, const point_t);
 static void IntersectPoint(const point_t, const point_t, point_t*);
 static bool LineIntersection(const line_t);
 static void StartLine(const float, const float, const float);
-static bool readCanbusData(CANController &can);
+static bool readCanbusData(CANController &can, CANData*);
 static bool GetRMCSentence(char* []);
 static float atof_(char []);
 static char* strtok_(char*, const char*);
@@ -150,7 +145,7 @@ private:
 	ID error_;
 };
 
-
+// File is used for testing. It replaces the data coming from the CANBUS
 //#define FILE_INPUT
 
 #ifdef FILE_INPUT
