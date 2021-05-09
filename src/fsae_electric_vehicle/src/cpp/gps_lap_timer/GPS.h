@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <iostream>
 #include <cassert>
+#include "CANController.h"
 
 // MSVC
 #define float double
@@ -41,6 +42,7 @@ static float Distance(const point_t, const point_t);
 static void IntersectPoint(const point_t, const point_t, point_t*);
 static bool LineIntersection(const line_t);
 static void StartLine(const float, const float, const float);
+static bool readCanbusData(CANController &can);
 static bool GetRMCSentence(char* []);
 static float atof_(char []);
 static char* strtok_(char*, const char*);

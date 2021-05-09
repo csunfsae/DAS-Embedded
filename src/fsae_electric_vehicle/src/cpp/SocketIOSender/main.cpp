@@ -19,7 +19,7 @@
   
   float suspFrontLeft, suspFrontRight, suspRearLeft, suspRearRight;
   
-  float gpsTime, gpsLat, gpsLon, gpsSpeed, gpsHeading, gpsMagVar;
+  float gpsHours, gpsMinutes, gpsSeconds, gpsFix, gpsLat, gpsLon, gpsSpeed, gpsHeading;
   
   std::mutex dataMutex;
 
@@ -30,12 +30,14 @@
   
   void gpsCallback(const fsae_electric_vehicle::gps::ConstPtr& msg) {
 	std::lock_guard<std::mutex> lock{dataMutex};
-	memcpy(&gpsTime, &msg->time, sizeof(speedVal)+1);
-	memcpy(&gpsLat, &msg->latitude, sizeof(speedVal)+1);
-	memcpy(&gpsLon, &msg->longitude, sizeof(speedVal)+1);
+	memcpy(&gpsHours, &msg->hours, sizeof(speedVal)+1);
+  memcpy(&gpsMinutes, &msg->minutes, sizeof(speedVal)+1);
+  memcpy(&gpsSeconds, &msg->seconds, sizeof(speedVal)+1);
+  memcpy(&gpsFix, &msg->fix, sizeof(speedVal)+1);
+	//memcpy(&gpsLat, &msg->latitude, sizeof(speedVal)+1);
+	//memcpy(&gpsLon, &msg->longitude, sizeof(speedVal)+1);
 	memcpy(&gpsSpeed, &msg->speed, sizeof(speedVal)+1);
 	memcpy(&gpsHeading, &msg->heading, sizeof(speedVal)+1);
-	memcpy(&gpsMagVar, &msg->magneticVariation, sizeof(speedVal)+1);
  }
 
  void brakeCallback(const fsae_electric_vehicle::brake_pressure::ConstPtr& msg) {
@@ -100,13 +102,14 @@ int main(int argc, char **argv) {
     h.socket()->emit("suspRearLeft", sio::double_message::create(suspRearLeft));
     h.socket()->emit("suspRearRight", sio::double_message::create(suspRearRight));
     
-    h.socket()->emit("gpsTime", sio::double_message::create(gpsTime));
+    h.socket()->emit("gpsHours", sio::double_message::create(gpsHours));
+    h.socket()->emit("gpsMinutes", sio::double_message::create(gpsMinutes));
+    h.socket()->emit("gpsSeconds", sio::double_message::create(gpsSeconds));
+    h.socket()->emit("gpsFix", sio::double_message::create(gpsFix));
     h.socket()->emit("gpsLat", sio::double_message::create(gpsLat));
     h.socket()->emit("gpsLon", sio::double_message::create(gpsLon));
     h.socket()->emit("gpsSpeed", sio::double_message::create(gpsSpeed));
     h.socket()->emit("gpsHeading", sio::double_message::create(gpsHeading));
-    h.socket()->emit("gpsMagVar", sio::double_message::create(gpsMagVar));
-    
     
     loop_rate.sleep();
   }

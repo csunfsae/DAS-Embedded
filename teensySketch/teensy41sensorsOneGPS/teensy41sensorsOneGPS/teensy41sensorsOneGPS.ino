@@ -18,7 +18,9 @@
  *  Example: ,$4G8P,G1S6V0,,33,03,,1152,,4143,,12043,,03618,,2461,,2186,,22803,,34120,,1204,,2065,,21287,,04415*,7253,
  *  
  *  Cannot send CAN frames via canbus header on teensy. GPS Teensy will stop displaying GPS data via serial console
- *  when 'CAN2' is used 
+ *  when 'CAN2' is used
+ *  
+ * 
  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!*/
 
 #include <FlexCAN_T4.h>    // FlexCan library for Teensy 4.0 and 4.1
@@ -115,49 +117,60 @@ void loop(void) {
     printGPSStats(GPS, gpsNum);
   }
 
+  // 2 CANBUS frames will be sent to include all data.
+  // Frame 1 includes hour, minute, seconds, fix, speed, angle
+  // Frame 2 includes Latitude and Longitude
   // Populate CANBUS struct with GPS1 data that we want to send
-  //populateCanbusStruct(GPS);
-  canMsg.flags.extended = random(0,2);
-  canMsg.flags.remote = 0;
-  //canMsg.len = 8;
-  canMsg.id = 0x34;
-  canMsg.buf[0] = 0;
-  canMsg.buf[1] = 1;
-  canMsg.buf[2] = 2;
-  canMsg.buf[3] = 3;
-  canMsg.buf[4] = 4;
-  canMsg.buf[5] = 5;
-  canMsg.buf[6] = 6; 
-  canMsg.buf[7] = 7; // Angle is mentioned as course in Adafruit lib header files
-
+  fillCanbusFrameOne(GPS);
   canbus.read(canMsg); // CANBUS pin will read the canMsg struct just populated with data  
   //canSniff(); // Print out the data contained in canMsg
   canbus.write(canMsg); // CANBUS pin will send CANBUS packet
 
-  // Populate CANBUS sruct with GPS2 data that we want to send
-  //populateCanbusStruct(GPS);
-  //canbus.read(canMsg); // CANBUS pin will read the canMst struct just populated with data  
+  
+  /*fillCanbusFrameTwo(GPS);
+  canbus.read(canMsg); // CANBUS pin will read the canMsg struct just populated with data  
   //canSniff(); // Print out the data contained in canMsg
-  //canbus.write(canMsg); // CANBUS pin will send CANBUS packet
+  canbus.write(canMsg); // CANBUS pin will send CANBUS packet*/
 
-  // This is the output of the can frame displayed in the serial monitor
-  // MB 0  OVERRUN: 0  LEN: 8 EXT: 0 TS: 0 ID: 34 Buffer: 4 6 28 58 47 0 0 3E
+  // Populate CANBUS sruct with GPS2 data that we want to send
+  /* Here */
 }
 
 
-void populateCanbusStruct(Adafruit_GPS GPS) {
-  canMsg.flags.extended = 0; // = random(0,2);
+
+void fillCanbusFrameOne(Adafruit_GPS GPS) {
+  // Split gpsAngle binary number into 2 separate bytes
+  uint16_t gpsAngle = GPS.angle; // 'angle' is mentioned as 'course' in Adafruit lib header files
+  uint8_t angleLeftByte = (uint8_t)gpsAngle; 
+  uint8_t angleRightByte = (uint8_t)(gpsAngle >> 8);
+  
+  canMsg.flags.extended = 0;
   canMsg.flags.remote = 0;
-  canMsg.len = 8;
-  canMsg.id = 0x34;
+  canMsg.id = 0x34; // id was chosen randomly
   canMsg.buf[0] = GPS.hour;
   canMsg.buf[1] = GPS.minute;
   canMsg.buf[2] = GPS.seconds;
-  canMsg.buf[3] = GPS.latitude;
-  canMsg.buf[4] = GPS.longitude;
-  canMsg.buf[5] = GPS.speed;
-  canMsg.buf[6] = GPS.magvariation; 
-  canMsg.buf[7] = GPS.angle; // Angle is mentioned as course in Adafruit lib header files
+  canMsg.buf[3] = GPS.fix;
+  canMsg.buf[4] = GPS.speed; 
+  canMsg.buf[5] = angleLeftByte; // This is little endian format
+  canMsg.buf[6] = angleRightByte;
+  //canMsg.buf[7] = Room for one more byte here
+}
+
+
+
+void fillCanbusFrameTwo(Adafruit_GPS GPS) {
+  canMsg.flags.extended = 0;
+  canMsg.flags.remote = 0;
+  canMsg.id = 0x35; // id was chosen randomly
+  /*canMsg.buf[0] = GPS.hour;
+  canMsg.buf[1] = GPS.minute;
+  canMsg.buf[2] = GPS.seconds;
+  canMsg.buf[3] = GPS.fix;
+  canMsg.buf[4] = GPS.latitude;
+  canMsg.buf[5] = GPS.longitude;
+  canMsg.buf[6] = GPS.speed; 
+  canMsg.buf[7] = GPS.*/
 }
 
 

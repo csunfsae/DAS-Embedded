@@ -1,3 +1,7 @@
+/*************************************************************
+ *  This code only works in the PST time zone
+*************************************************************/
+
 #include "ros/ros.h"
 #include <fsae_electric_vehicle/gps.h> /* This gps.h is actually referencing 'gps.msg' file in msg folder.
 Idk why its like this but it wont compile without it */
@@ -39,33 +43,27 @@ int main(int argc, char **argv)
   	ros::Publisher gps_lap_timer_pub = n.advertise<fsae_electric_vehicle::gps>("gps_lap_timer", 1000);
   	fsae_electric_vehicle::gps gps_lap_timer; // constructor
 
- 	char* gpsTokens[RMC_CHECKSUM + 1]; // Pointer to GPS RMC (string) fields
+    // Start the CABUS header on the Jetson/Quasar board
+	CANController can; 
+	can.start("can0");
 
-#ifdef FILE_INPUT
-	// Attempt to open gps data file
-	file = fopen(filePath, "r");
-	std::cout << "after open file";
-	if (file == NULL) {
-		printf("-----------ERROR OPENING FILE-----------\n");
-		ROS_INFO("-----------ERROR OPENING FILE 2-----------\n");
-		exit(-1);
-	}
-	//fgets(buffer, GPS_STRING_LENGTH, file);
-	//std::cout << buffer[0];
-#else
+ 	char* gpsTokens[RMC_CHECKSUM + 1]; // Pointer to GPS RMC (string) fields
+	//float data[8] = {0.0, 0, 0, 0, 0, 0, 0, 0};
+	CANData data;
+
 	/********** Maybe replace this while loop with a function that waits to save cpu cycles***********/
 	// Wait for GPS fix
 	do {
+		readCanbusData(can);
 		ROS_DEBUG("Waiting for GPS fix!\n");
 		std::cout << "Waiting for GPS fix! c\n" << std::endl;
 		std::cin.get();
-	} while (!GetRMCSentence(gpsTokens));
-	std::cout << "\nGPS status active!";
-#endif
+	} while (data.data[3] == 0);
+	std::cout << "\nGPS Found Fiix!";
 	
 	// Establish StartLine
 	float ts;
-	if (GetRMCSentence(gpsTokens))
+	if (readCanbusData(can))
 		ts = EstablishStartLine(gpsTokens);
 	else {
 		error.SetError(err::ID::BAD_SENTENCE);
@@ -75,21 +73,21 @@ int main(int argc, char **argv)
 	}
 
 	ros::Rate loop_rate(30); // This means that loop rate can be up to 30 times per second
-
   	while (ros::ok()) {
 		ROS_INFO_ONCE("ROS is ok!");
-		if (GetRMCSentence(gpsTokens)) { // Receive GPS data from file or from CANBUS
+		if (readCanbusData(can)) { // Receive GPS data from file or from CANBUS
 			if (ts != 0.0f) {
 				Run(ts, gpsTokens);
 
 				// Store GPS data 
-				gps_lap_timer.time = atof(gpsTokens[1]);
-				gps_lap_timer.latitude = atof(gpsTokens[4]);
-				gps_lap_timer.longitude = atof(gpsTokens[6]);
-				gps_lap_timer.speed = atof(gpsTokens[7]);
-				gps_lap_timer.heading = atof(gpsTokens[8]);
-				gps_lap_timer.magneticVariation = atof(gpsTokens[11]);
-				//
+				gps_lap_timer.hours = data.data[0];
+				gps_lap_timer.minutes = data.data[1];
+				gps_lap_timer.seconds = data.data[2];
+				gps_lap_timer.fix = data.data[3];
+				gps_lap_timer.latitude = data.data[4];
+				gps_lap_timer.longitude = data.data[5];
+				gps_lap_timer.speed = data.data[6];
+				gps_lap_timer.heading = data.data[7];
 				
 				/*Testing data to be sent to SocketIOSender
 				gps_lap_timer.time = 32;
@@ -108,8 +106,6 @@ int main(int argc, char **argv)
 			//exit(error.GetError());
 		}
 
-
-
     	ros::spinOnce();
    		loop_rate.sleep();
   	}
@@ -121,6 +117,30 @@ int main(int argc, char **argv)
 
 }
 
+
+
+static bool readCanbusData(CANController &can) {
+	float hours = 0, minutes = 0, seconds = 0, fix = 0, latitude = 0, longitude = 0, speed = 0;
+	uint8_t heading = 0;
+	//CANController can; 
+	//can.start("can0");
+	//std::cin.get();
+	auto data = can.getData(0x34, 0x1FFFFFFF); // First param is idFilter, 2nd is idMask
+	if (data.has_value()) {
+		//std::memcpy(&buffer, data->data, RMC_CHECKSUM + 1); //
+		hours = data->data[0]; // May be able to combine 'hours' 'minutes' & 'seconds' into just 'seconds' later on
+		minutes = data->data[1];
+		seconds = data->data[2];
+		fix = data->data[3];
+		//latitude = data->data[4];
+		//longitude = data->data[5];
+		speed = data->data[4];
+		heading = data->data[7];
+	} else {
+		return false;
+	}
+	return true;
+}
 
 
 // An RMC sentence is a standardized string of chars emitted by GPS units
