@@ -51,7 +51,7 @@ int main(int argc, char **argv)
 
 	// Wait for GPS fix
 	do { // Maybe replace this while loop with a function that waits to save cpu cycles
-		readCanbusData(can, &canbusFrame);
+		readCanbusGPSData(can, &canbusFrame);
 		ROS_DEBUG("Waiting for GPS fix!\n");
 		std::cout << "Waiting for GPS fix! c\n" << std::endl;
 	} while (canbusFrame.data[3] == 0);
@@ -59,7 +59,7 @@ int main(int argc, char **argv)
 	
 	// Establish StartLine
 	float ts;
-	if (readCanbusData(can, &canbusFrame)) {
+	if (readCanbusGPSData(can, &canbusFrame)) {
 		//ts = EstablishStartLine(&canbusFrame);
 	}
 	else {
@@ -72,7 +72,7 @@ int main(int argc, char **argv)
 	ros::Rate loop_rate(30); // This means that loop rate can be up to 30 times per second
   	while (ros::ok()) {
 		ROS_INFO_ONCE("ROS is ok!");
-		if (readCanbusData(can, &canbusFrame)) { // Receive GPS data from file or from CANBUS
+		if (readCanbusGPSData(can, &canbusFrame)) { // Receive GPS data from file or from CANBUS
 			if (ts != 0.0f) {
 				//Run(ts, gpsTokens);
 
@@ -104,7 +104,7 @@ int main(int argc, char **argv)
 
 
 
-static bool readCanbusData(CANController &can, CANData* canbusFrame) {
+static bool readCanbusGPSData(CANController &can, CANData* canbusFrame) {
 	//float hours = 0, minutes = 0, seconds = 0, fix = 0, latitude = 0, longitude = 0, speed = 0;
 	//uint16_t heading = 0;
 	std::optional<CANData> canData = can.getData(0x34, 0x1FFFFFFF); // First param is idFilter, 2nd is idMask.

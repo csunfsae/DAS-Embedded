@@ -1,9 +1,15 @@
+/*
+* This is an unused program. It was originally created because ROS was going to send data to the server via linux sockets
+* That idea was scrapped in favor of using SocketIO. This code will be kept here just in case its needed but it may be
+* deleted if it is guaranteed that it will not be needed in the future.
+*
+* The struct is the object that was going to be sent to the server
+*/
+
 #include <stdint.h>
 #include <string.h>
 #include <time.h>
-
 #include <string>
-
 #include "ros/ros.h"
 #include "std_msgs/String.h"
 #include <fsae_electric_vehicle/data_struct.h>

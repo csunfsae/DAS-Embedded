@@ -1,41 +1,41 @@
+/*************************************************************************************************************
+ * This suspension node listens for packets on the CANBUS that contain suspension data. That is the data that
+ * contains a voltage value representing how far each suspension sensor is compressed/decompressed. One for
+ * each wheel.
+ ************************************************************************************************************/
+
 #include "ros/ros.h"
 #include <fsae_electric_vehicle/suspension.h>
 #include "CANController.h"
 
 int main(int argc, char **argv) {
-  std::cout << "Starting Suspension" << std::endl;
-
-  ros::init(argc, argv, "Suspension");
-  std::cout << "initialized suspension node" << std::endl;
+    ros::init(argc, argv, "Suspension");
   
-  ros::NodeHandle n;
-  std::cout << "After node handle calling ros::start()" << std::endl;
+    ros::NodeHandle n;
 
-  ros::Publisher suspension_msg = n.advertise<fsae_electric_vehicle::suspension>("suspension", 1000);
-  std::cout << "After publisher" << std::endl;
+    ros::Publisher suspension_msg = n.advertise<fsae_electric_vehicle::suspension>("suspension", 1000);
   
-  fsae_electric_vehicle::suspension suspension; //constructor
- 
-  ros::Rate loop_rate(5);
-  std::cout << "listening" << std::endl;
+    fsae_electric_vehicle::suspension suspension; // Constructor
   
-  CANController can;
-  can.start("can0");
+    // Start CANBUS Header
+    CANController can;
+    can.start("can0");
 
-  float lastVal = 0;
+    std::cout << "Suspension Init!" << std::endl;
 
-  while (ros::ok()) {
-    auto data = can.getData(0x02051881, 0x1FFFFFFF);
-    if (data.has_value()) {
-      std::memcpy(&lastVal, data->data, 4);
+    ros::Rate loop_rate(5);
+
+    while (ros::ok()) {
+        auto data = can.getData(0x02051881, 0x1FFFFFFF);
+        if (data.has_value()) {
+            suspension.frontLeft = data->data[0];
+            suspension.frontRight = data->data[1];
+            suspension.rearLeft = data->data[2];
+            suspension.rearRight = data->data[3];
+        }
+
+        suspension_msg.publish(suspension);
+        ros::spinOnce();
+        loop_rate.sleep();
     }
-    lastVal += .1;
-    suspension.frontLeft = 0;
-    suspension.frontRight = 22;
-    suspension.rearLeft = 33;
-    suspension.rearRight = 44;
-    suspension_msg.publish(suspension);
-    ros::spinOnce();
-    loop_rate.sleep();
-  }
 }

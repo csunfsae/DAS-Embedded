@@ -1,3 +1,7 @@
+/********************************************************************************************************************
+ * This is the networking code that sends the vehicle data to the server using SocketIO
+ *******************************************************************************************************************/
+
 #include "ros/ros.h"
 #include <ros/callback_queue.h>
 #include "fsae_electric_vehicle/serial.h"
@@ -106,10 +110,11 @@ int main(int argc, char **argv) {
     h.socket()->emit("gpsMinutes", sio::double_message::create(gpsMinutes));
     h.socket()->emit("gpsSeconds", sio::double_message::create(gpsSeconds));
     h.socket()->emit("gpsFix", sio::double_message::create(gpsFix));
-    h.socket()->emit("gpsLat", sio::double_message::create(gpsLat));
-    h.socket()->emit("gpsLon", sio::double_message::create(gpsLon));
+    //h.socket()->emit("gpsLat", sio::double_message::create(gpsLat));
+    //h.socket()->emit("gpsLon", sio::double_message::create(gpsLon));
     h.socket()->emit("gpsSpeed", sio::double_message::create(gpsSpeed));
     h.socket()->emit("gpsHeading", sio::double_message::create(gpsHeading));
+    
     
     loop_rate.sleep();
   }

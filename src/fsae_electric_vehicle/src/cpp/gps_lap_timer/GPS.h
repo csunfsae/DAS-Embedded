@@ -37,7 +37,7 @@ static float Distance(const point_t, const point_t);
 static void IntersectPoint(const point_t, const point_t, point_t*);
 static bool LineIntersection(const line_t);
 static void StartLine(const float, const float, const float);
-static bool readCanbusData(CANController &can, CANData*);
+static bool readCanbusGPSData(CANController &can, CANData*);
 static bool GetRMCSentence(char* []);
 static float atof_(char []);
 static char* strtok_(char*, const char*);

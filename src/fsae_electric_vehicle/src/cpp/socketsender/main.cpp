@@ -1,3 +1,9 @@
+/*********************************************************************************************
+ * This is the old unused networking code. It was originally created because ROS was going to send data to the server via linux sockets
+ * That idea was scrapped in favor of using SocketIO. This code will be kept here just in case its needed but it may be
+ * deleted if it is guaranteed that it will not be needed in the future.
+ ********************************************************************************************/
+
 #include "ros/ros.h"
 // #include "fsae_electric_vehicle/gps.h"
 // #include "fsae_electric_vehicle/serial.h"
