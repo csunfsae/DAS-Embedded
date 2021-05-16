@@ -76,7 +76,7 @@ int main(int argc, char **argv)
 			if (ts != 0.0f) {
 				//Run(ts, gpsTokens);
 
-				// Store GPS data 
+				// Store GPS data
 				gps_lap_timer.hours = canbusFrame.data[0];
 				gps_lap_timer.minutes = canbusFrame.data[1];
 				gps_lap_timer.seconds = canbusFrame.data[2];
@@ -105,11 +105,13 @@ int main(int argc, char **argv)
 
 
 static bool readCanbusGPSData(CANController &can, CANData* canbusFrame) {
-	//float hours = 0, minutes = 0, seconds = 0, fix = 0, latitude = 0, longitude = 0, speed = 0;
-	//uint16_t heading = 0;
-	std::optional<CANData> canData = can.getData(0x34, 0x1FFFFFFF); // First param is idFilter, 2nd is idMask.
-																		// This above line will always return data because the GPS has a fix
-	if (canData->data[3] == 0)
+	// Read CANBUS frames from the CANBUS
+	std::optional<CANData> canData = can.getData(0x35, 0x1FFFFFFF); // First param is the CAN frame ID, 2nd is ID mask.
+	//std::optional<CANData> canData = can.getData(0x36, 0x1FFFFFFF); // These will always return data because the GPS has a fix
+	//std::optional<CANData> canData = can.getData(0x37, 0x1FFFFFFF);
+	//std::optional<CANData> canData = can.getData(0x38, 0x1FFFFFFF);
+
+	if (canData->data[3] == 0) // If GPS doesnt have a fix (which it always should at this point)
 		return false;
 
 	canbusFrame->data[0] = canData->data[0];
