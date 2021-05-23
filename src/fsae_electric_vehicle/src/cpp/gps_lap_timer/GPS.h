@@ -7,7 +7,7 @@
 #include "CANController.h"
 
 // MSVC
-#define float double
+//#define float double
 
 #define MIN(x, y)                     (((x) < (y)) ? (x) : (y))
 #define MAX(x, y)                     (((x) > (y)) ? (x) : (y))
@@ -15,15 +15,16 @@
 #define D_TO_RADIANS                  (PI/180.0f)
 
 // GPS RMC sentence fields.
-#define RMC_HOUR                      0
-#define RMC_MINUTES					  1
-#define RMC_SECONDS					  2
-#define RMC_FIX                       3
-#define RMC_SPEED                     4
-#define RMC_HEADING                   6
+#define GPS_HOUR                      0
+#define GPS_MINUTES					  1
+#define GPS_SECONDS					  2
+#define GPS_FIX                       3
+#define GPS_SPEED                     4
+#define GPS_HEADING_1                 5
+#define GPS_HEADING_2				  6
 
-#define RMC_LATITUDE                  0
-#define RMC_LONGITUDE                 4
+#define GPS_LATITUDE                  0
+#define GPS_LONGITUDE                 4
 
 #define LATITUDE                      0x01
 #define LONGITUDE                     0x02

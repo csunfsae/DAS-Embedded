@@ -1,5 +1,9 @@
 /*************************************************************
  *  This code only works in the PST time zone
+ * 
+ * I was working on reading the run function. On line 326.
+ * But first i should make sure sending gps data to the server works
+ * Now im working on getting my program to compile. Im at line 76
 *************************************************************/
 
 #include "ros/ros.h"
@@ -44,34 +48,101 @@ int main(int argc, char **argv)
   	fsae_electric_vehicle::gps gps_lap_timer; // constructor
 
     // Start the CABUS header on the Jetson/Quasar board
-	CANController can; 
+	CANController can;
 	can.start("can0");
-
-	CANData canbusFrame; // Struct to hold the data received on the CANBUS header
 
 	// Wait for GPS fix
 	do { // Maybe replace this while loop with a function that waits to save cpu cycles
-		readCanbusGPSData(can, &canbusFrame);
+		// Read CANBUS packets that contain GPS_FIX data (not the packets that contain lat/lon data)
+		std::optional<CANData> canData = can.getData(0x35, 0x1FFFFFFF);
+		if (canData.has_value() && canData->data[GPS_FIX] == 1)
+			break;
+		//else if ((canData = can.getData(0x37, 0x1FFFFFFF)))
+
+		std::optional<CANData> canData2 = can.getData(0x37, 0x1FFFFFFF);
+		if (canData2.has_value() && canData2->data[GPS_FIX] == 1)
+			break;
+
 		ROS_DEBUG("Waiting for GPS fix!\n");
 		std::cout << "Waiting for GPS fix! c\n" << std::endl;
-	} while (canbusFrame.data[3] == 0);
-	std::cout << "\nGPS Found Fiix!";
-	
-	// Establish StartLine
-	float ts;
-	if (readCanbusGPSData(can, &canbusFrame)) {
-		//ts = EstablishStartLine(&canbusFrame);
-	}
-	else {
-		error.SetError(err::ID::BAD_SENTENCE);
-		ROS_FATAL("Cannot establish startline due to GetRMCSentence\n");
-		ROS_DEBUG("Cannot establish startline due to GetRMCSentence\n");
-		//exit(error.GetError());
+	} while (true);
+	std::cout << "\nGPS Found Fix!";
+
+	// If button is pressed to make startline
+	// This is set to true because there is no button to make the startline yet
+	float timestamp;
+	if (true) {
+		CANData canData; // Struct to hold the data received on the CANBUS header
+		timestamp = EstablishStartLine(canData); // Establish StartLine
 	}
 
 	ros::Rate loop_rate(30); // This means that loop rate can be up to 30 times per second
   	while (ros::ok()) {
 		ROS_INFO_ONCE("ROS is ok!");
+
+		// Read CANBUS packets from the CANBUS header
+		std::optional<CANData> canData = can.getData(0x35, 0x1FFFFFFF); // First param is the CAN frame ID, 2nd is ID mask.
+
+		// Store data in the CANBUS packet depending on which packet is recieved
+		if (canData.has_value() && canData->data[GPS_FIX]) {
+			int32_t latitude, longitude;
+
+			switch(canData->id) {
+				case 0x35:
+					[[fallthrough]]; // If id == 0x35 || 0x37
+				case 0x37:
+					gps_lap_timer.hours = canData->data[0];
+					gps_lap_timer.minutes = canData->data[1];
+					gps_lap_timer.seconds = canData->data[2];
+					gps_lap_timer.fix = canData->data[3];
+					gps_lap_timer.speed = canData->data[4];
+					gps_lap_timer.heading = canData->data[5] & canData->data[6]; // This may cause gps_lap_timer.heading to be read wrong since its not a uint16_t
+					break;
+				case 0x36:
+					[[fallthrough]]; // If id == 0x36 || 0x38
+				case 0x38:
+					for (int i = 0; i < 4; i++) {
+						latitude = canData->data[i];
+						latitude = latitude << 8;
+					}
+					for (int i = 4; i < 8; i++) {
+						longitude = canData->data[i];
+						longitude = longitude << 8;
+					}
+					float flatitude = (float)(latitude / 10000);
+					float flongitude = (float)(longitude / 10000);
+					gps_lap_timer.latitude = latitude;
+					gps_lap_timer.longitude = longitude;
+					break;
+			}
+			gps_lap_timer_pub.publish(gps_lap_timer);
+		}
+
+		ros::spinOnce();
+   		loop_rate.sleep();
+
+		/*
+		std::optional<CANData> canData = can.getData(0x36, 0x1FFFFFFF);
+		if (canData->valid) {
+			storeFrameData(&canbusFrame, gps_lap_timer); // has lines like... gps_lap_timer.hours canData[0];
+			gps_lap_timer_pub.publish(gps_lap_timer);
+		}
+		std::optional<CANData> canData = can.getData(0x37, 0x1FFFFFFF);
+		if (canData->valid) {
+			storeFrameData(&canbusFrame, gps_lap_timer); // has lines like... gps_lap_timer.hours canData[0];
+			gps_lap_timer_pub.publish(gps_lap_timer);
+		}
+		std::optional<CANData> canData = can.getData(0x38, 0x1FFFFFFF);
+		if (canData->valid) {
+			storeFrameData(&canbusFrame, gps_lap_timer); // has lines like... gps_lap_timer.hours canData[0];
+			gps_lap_timer_pub.publish(gps_lap_timer);
+		}
+		*/
+
+		/**************************************************************************************************************************
+		if (ts != 0.0f) {
+			//Run(ts, gpsTokens);
+		}
 		if (readCanbusGPSData(can, &canbusFrame)) { // Receive GPS data from file or from CANBUS
 			if (ts != 0.0f) {
 				//Run(ts, gpsTokens);
@@ -96,20 +167,74 @@ int main(int argc, char **argv)
 			//ROS_DEBUG_THROTTLE(1, "RMC sentence was lost!");
 			//exit(error.GetError());
 		}
-
-    	ros::spinOnce();
-   		loop_rate.sleep();
+		**************************************************************************************************************************/
   	}
+}
+
+
+/*
+static void storeFrameData(CANData canbusFrame, fsae_electric_vehicle::gps gps_lap_timer) {
+	int32_t latitude, longitude;
+
+	switch(canbusFrame->id) {
+		case 0x35 || 0x37:
+			gps_lap_timer.hours = canbusFrame->data[0];
+			gps_lap_timer.minutes = canbusFrame->data[1];
+			gps_lap_timer.seconds = canbusFrame->data[2];
+			gps_lap_timer.fix = canbusFrame->data[3];
+			gps_lap_timer.speed = canbusFrame->data[4];
+			gps_lap_timer.heading = canbusFrame->data[5] & canbusFrame->data[6]; // This may cause gps_lap_timer.heading to be read wrong since its not a uint16_t
+			break;
+		case 0x36 || 0x38:
+			for (int i = 0; i < 4; i++) {
+				latitude = canbusFrame->data[i];
+				latitude = latitude << 8;
+			}
+			for (int i = 4; i < 8; i++) {
+				longitude = canbusFrame->data[i];
+				longitude = longitude << 8;
+			}
+			float flatitude = (float)(latitude / 10000);
+			float flongitude = (float)(longitude / 10000);
+			gps_lap_timer.latitude = latitude;
+			gps_lap_timer.longitude = longitude;
+			break;
+		case 0x37:
+			gps_lap_timer.hours = canbusFrame->data[0];
+			gps_lap_timer.minutes = canbusFrame->data[1];
+			gps_lap_timer.seconds = canbusFrame->data[2];
+			gps_lap_timer.fix = canbusFrame->data[3];
+			gps_lap_timer.speed = canbusFrame->data[4];
+			gps_lap_timer.heading = canbusFrame->data[5] & canbusFrame->data[6]; // This may cause gps_lap_timer.heading to be read wrong since its not a uint16_t
+			break;
+		case 0x38:
+			for (int i = 0; i < 4; i++) {
+				latitude = canbusFrame->data[i];
+				latitude = latitude << 8;
+			}
+			for (int i = 4; i < 8; i++) {
+				longitude = canbusFrame->data[i];
+				longitude = longitude << 8;
+			}
+			float flatitude = (float)(latitude / 10000);
+			float flongitude = (float)(longitude / 10000);
+			gps_lap_timer.latitude = latitude;
+			gps_lap_timer.longitude = longitude;
+			break;
+	}
 }
 
 
 
 static bool readCanbusGPSData(CANController &can, CANData* canbusFrame) {
 	// Read CANBUS frames from the CANBUS
+	// If CANBUS frames are stored in the vector<CANData> m_dataMap for a long time then reading data from the CANBUS like this will cause old frames to be
+	// read when newer frames are available. Idk if multiple frames with the same ID are kept in the vector simultaneously. Idk how many frames the vector
+	// stores before it starts throwing frames out.
 	std::optional<CANData> canData = can.getData(0x35, 0x1FFFFFFF); // First param is the CAN frame ID, 2nd is ID mask.
-	//std::optional<CANData> canData = can.getData(0x36, 0x1FFFFFFF); // These will always return data because the GPS has a fix
-	//std::optional<CANData> canData = can.getData(0x37, 0x1FFFFFFF);
-	//std::optional<CANData> canData = can.getData(0x38, 0x1FFFFFFF);
+	std::optional<CANData> canData = can.getData(0x36, 0x1FFFFFFF); // These will always return data because the GPS has a fix
+	std::optional<CANData> canData = can.getData(0x37, 0x1FFFFFFF);
+	std::optional<CANData> canData = can.getData(0x38, 0x1FFFFFFF);
 
 	if (canData->data[3] == 0) // If GPS doesnt have a fix (which it always should at this point)
 		return false;
@@ -123,38 +248,39 @@ static bool readCanbusGPSData(CANController &can, CANData* canbusFrame) {
 	canbusFrame->data[6] = canData->data[6];
 	return true;
 }
+*/
 
 
-/*
-static float EstablishStartLine(CANData* canbusFrame) {
-	float ts;
 
-	if (canbusFrame->data[RMC_FIX] == 0)
+static float EstablishStartLine(CANData canData) { // Might not need to pass in this canData
+	float posTimestamp, latitudeCoordinate, longitudeCoordinate;
+
+	// Verify that GPS has fix
+	if (!canData.data[GPS_FIX])
 		return 0.0f;
 
 	// Position timestamp
-	ts = ConvertToSeconds(canbusFrame->data[RMC_HOUR]);
+	//posTimestamp = ConvertToSeconds(canData->data[GPS_HOUR]);
 
-	// Get current track position (lat, long)
-	char temp[12];
-	GeoCopy(canbusFrame->data[RMC_LATITUDE], temp, LATITUDE);
-	startPoint.x = atof_(temp);
-	GeoCopy(canbusFrame->data[RMC_LONGITUDE], temp, LONGITUDE);
-	startPoint.y = atof_(temp);
+	// Get current track position (lat, long) by reading canbus header. startHeading = canData->data[GPS_HEADING_1];
+	//startPoint.x = 
+	//startPoint.y = 
 
-	// Heading while crossing start/finish
-	startHeading = atoi(tokens[RMC_TRACK]);
+	// Heading while crossing start/finish. Vehicle should be as parallel to the sides of the track as possible
+	startHeading = canData.data[GPS_HEADING_1];
 
 	// Define startline
-	StartLine((float)startPoint.x, (float)startPoint.y, (float)startHeading);
+	StartLine(startPoint, (float)startHeading);
+
+	// Set the current track position
 	track.p0.x = startPoint.x;
 	track.p0.y = startPoint.y;
 
-	return ts;
-}*/
+	return posTimestamp;
+}
 
 
-/*
+
 static void Run(float timeStamp, char *tokens[]) {
 	// Lap counters.
 	uint8_t numLaps = 0;
@@ -169,31 +295,29 @@ static void Run(float timeStamp, char *tokens[]) {
 	uint8_t ticToc = 0;
 	unsigned char clock[2] = { 47, 92 };
 
-// Note timestamp of startline point.
+	// Note timestamp of startline point.
 	lapData[numLaps].setStart(timeStamp);
 
 	std::cout << clock[++ticToc & 0x01] << '\r';
 
-// Previous position GPS time stamp.
+	// Previous position GPS time stamp.
 	float prevTimeStamp = timeStamp;
 
 	// Confirm sentence is sequential.
+	/* Doesnt seem like were going to need this function
 	timeStamp = ConvertToSeconds(tokens[RMC_TIME]);
 	if (!Equal(timeStamp, prevTimeStamp + GPS_UPDATE_PERIOD)) {
 		error.SetError(err::ID::TIME_STAMP);
 		ROS_DEBUG("GPS has no fix");
-	}
+	} */
 
 	// Get current track position (lat, long).
-	if (tokens[RMC_LATITUDE] != nullptr || tokens[RMC_LONGITUDE] != nullptr) {
-		char temp[12];
-
-		GeoCopy(tokens[RMC_LATITUDE], temp, LATITUDE);
-		track.p1.x = atof_(temp);
-		GeoCopy(tokens[RMC_LONGITUDE], temp, LONGITUDE);
-		track.p1.y = atof_(temp);
-	}
-	else
+	char temp[12];
+	GeoCopy(canData.data[GPS_LATITUDE], temp, LATITUDE);
+	track.p1.x = atof_(temp);
+	GeoCopy(canData.data[GPS_LONGITUDE], temp, LONGITUDE);
+	track.p1.y = atof_(temp);
+	
 
 
 	// Ignore gps sentences for 1 second after crossing start/finish.
@@ -243,7 +367,7 @@ static void Run(float timeStamp, char *tokens[]) {
 	// Prepare for next iteration.
 	track.p0.x = track.p1.x;
 	track.p0.y = track.p1.y;
-}*/
+}
 
 
 
@@ -281,30 +405,48 @@ static float Distance(const point_t t1, const point_t t2) {
 }
 
 
+/*
+So to create a start line we need to represent the start line as a pair of x & y coordinates. The GPS coordinates of the vehicle will
+act as the x & y coordinates. Using 2 coordinates can only represent an opject in a 2d plane, but since the distances we are dealing
+with are so small relative to the circumference of the earth, using 2 GPS coordinates will work just fine. Tracking the position of
+a vehicle going long distances in a single direction on the surface of the Earth will not work with this program because the Earth
+is not flat. #FlatEarthSociety This program doesnt prove that the Earth is round though so the flat earthers win again. So to create
+the startline we need to first create a line that lies in the direction that the car is facing. That line will be called headingLine.
+One (x,y) coordinate of headingLine will be the GPS coordinates of the car. The 2nd (x,y) coordinate will need to be created. Once we
+have that headingLine defined then we can go ahead and create a new line called start Line that lies perpendicular to headingLine &
+the intersection point will be the GPS coordinates of the car when the EstablishStartLine function is called. The start line cannot
+be an infinite line or else the car will cross that infinite start line at least twice during every lap so we need to define endpoints
+for the start line. The start line length will have to represent about 20-50 feet in the real world, which will translate to about
+0.000110 degrees in GPS coordinates. The length of the startline should be user defineable.
+*/
 
 // Construct a startline.
-static void StartLine(const float sx, const float sy, const float shdg) {
-	float tx, ty; // Projected track coordinates.
-	float m, b;   // Slope & y intercept.
+static void StartLine(point_t headingLineCoor, const float sHeading) {
+	point_t headingLineCoor2;	// Second pair of coodinates that defines an infinite imaginary line (headingLine) pointing in the direction the car is facing
+	float m, b, temp;			// Slope & y-intercept of that line
 
-	// Project racetrack along current heading.
-	tx = sx + PROJECTION_DISTANCE * cos(DEGTORAD(shdg));
-	ty = sy + PROJECTION_DISTANCE * sin(DEGTORAD(shdg));
-	// Projected racetrack slope & y-intercept. 
-	m = (sy - ty) / (sx - tx);
-	b = sy - (m * sx);
+	// Create another (x,y) coordinate that lies in the same line as headingLine
+	// This creates a line in our imaginary 2d plane that points in the direction the car is facing
+	// This line is used for creating a startline that is perpendicular to this one that is being created
+	headingLineCoor2.x = headingLineCoor.x + PROJECTION_DISTANCE * cos(DEGTORAD(sHeading));
+	headingLineCoor2.y = headingLineCoor.y + PROJECTION_DISTANCE * sin(DEGTORAD(sHeading));
+	
+	// Calculate the slope & y-intercept of headingLine 
+	m = (headingLineCoor.y - headingLineCoor2.y) / (headingLineCoor.x - headingLineCoor2.x);
+	b = headingLineCoor.y - (m * headingLineCoor.x); // I dont think i need this line because this b is immediately redefined below
 
-	// Construct perpendicular (startline) slope & y-intercept.
+	// Construct the perpendicular line (start line) slope & y-intercept.
 	m = -1.0f / m;
-	b = sy - (m * sx);
+	b = headingLineCoor.y - (m * headingLineCoor.x);
 
-	// Define endpoints of the perpendicular.
-	tx = sx + LINE_WIDTH_2; // Note: tx re-used as a temporary value here.
-	startingLine.p0.y = (m * tx + b);
-	startingLine.p0.x = tx;
-	tx -= LINE_WIDTH;
-	startingLine.p1.y = (m * tx + b);
-	startingLine.p1.x = tx;
+	// Define endpoints of the perpendicular line (start line)
+	// I think this defines the endpoints hundreds of miles apart due to LINE_WIDTH_2 being too big. Should be < 1
+	temp = headingLineCoor.x + LINE_WIDTH_2;
+	startingLine.p0.y = (m * temp + b);
+	startingLine.p0.x = temp;
+	temp -= LINE_WIDTH;
+	startingLine.p1.y = (m * temp + b);
+	startingLine.p1.x = temp;
 }
 
 
@@ -360,18 +502,18 @@ static bool LineIntersection(const line_t track) {
 
 
 // 2d lines point of intersection.
-static void IntersectPoint(const point_t p1, const point_t p2, point_t* i) {
+static void IntersectPoint(const point_t p1, const point_t p2, point_t* intersectionPoint) {
 	float denom, numera, mua; //numerb, mub;
 
 	// No checks because it is assumed the lines intersect.
-	denom = (startingLine.p1.y - startingLine.p0.y) * (p2.x - p1.x) - (startingLine.p1.x - startingLine.p0.x) * (p2.y - p1.y);
-	numera = (startingLine.p1.x - startingLine.p0.x) * (p1.y - startingLine.p0.y) - (startingLine.p1.y - startingLine.p0.y) * (p1.x - startingLine.p0.x);
+	denom = (startingLine.p1.y - startingLine.p0.y) * (p2.x - p1.x) - (startingLine.p1.x - startingLine.p0.x) * (p2.y - p1.y); // y - Py
+	numera = (startingLine.p1.x - startingLine.p0.x) * (p1.y - startingLine.p0.y) - (startingLine.p1.y - startingLine.p0.y) * (p1.x - startingLine.p0.x); // x - Px
 	//numerb = (p2.x - p1.x)*(p1.y - startingLine1.y) - (p2.y - p1.y)*(p1.x - startingLine1.x);
 
-	mua = numera / denom;
+	mua = numera / denom; // Calculate the slope
 	//mub = numerb/denom;
-	i->x = p1.x + mua * (p2.x - p1.x);
-	i->y = p1.y + mua * (p2.y - p1.y);
+	intersectionPoint->x = p1.x + mua * (p2.x - p1.x); // Point-Slope-Form y = m(x - Px) + Py
+	intersectionPoint->y = p1.y + mua * (p2.y - p1.y);
 }
 
 
@@ -462,9 +604,9 @@ static float ConvertToSeconds(char* time) {
 	if (time == nullptr)
 		return 0.0f;
 
-	float ft = atof_(time);
+	float timeHours = atof_(time);
 	
-	uint16_t hm = (uint16_t)(ft / 100);
+	uint16_t hm = (uint16_t)(timeHours / 100);
 	uint16_t hours = (uint16_t)(ft / 10000);
 	uint16_t minutes = (hm - (hours * 100) + (hours * 60));
 	float seconds = ft - (hm * 100) + (minutes * 60);
@@ -479,7 +621,7 @@ static bool Equal(float a, float b) { return fabs(a - b) <= FLT_EPSILON; }
 
 
 
-// Check heading and angle within 30 degrees.
+// Check if heading and angle are within 30 degrees of each other
 static bool Within30(const uint16_t a, const uint16_t h) { return ((360 - abs(a - h) % 360 < 30) || (abs(a - h) % 360 < 30)); }
 
 
