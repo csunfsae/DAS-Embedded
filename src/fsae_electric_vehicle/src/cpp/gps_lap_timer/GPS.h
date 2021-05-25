@@ -32,12 +32,12 @@
 struct point_t { float x, y; };
 struct line_t { point_t p0, p1; };
 
-static float EstablishStartLine(char *[]);
+static float EstablishStartLine(const std::pair<CANData, CANData>);
 static void Run(float, char *[]);
 static float Distance(const point_t, const point_t);
 static void IntersectPoint(const point_t, const point_t, point_t*);
 static bool LineIntersection(const line_t);
-static void StartLine(const float, const float, const float);
+static void StartLine(const point_t, const float);
 static bool readCanbusGPSData(CANController &can, CANData*);
 static bool GetRMCSentence(char* []);
 static float atof_(char []);
@@ -70,14 +70,13 @@ static constexpr float LINE_WIDTH{ 50.0f };
 static constexpr float LINE_WIDTH_2{ 25.0f };
 static constexpr float PROJECTION_DISTANCE{ 100.0f };
 
-// Maximum possible characters in a GPS string (+ fudge).
-const std::size_t GPS_STRING_LENGTH = 80;
-
 
 
 // Lap time class.
+// This should be defined as a class imo
 struct lap
 {
+public:
 	void setStart(const float t)
 	{
 		assert(t >= 0.0f);
@@ -93,7 +92,7 @@ struct lap
 	float getStart() const { return start; }
 	float getStop() const { return stop; }
 	
-	float getTime() const 
+	float getLapDuration() const 
 	{
 		if (stop < start)
 			return 0.0f;

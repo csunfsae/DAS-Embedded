@@ -15,10 +15,11 @@
 
 /*!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
  * The problem with this is that it prints out chars that alternate from GPS1 and GPS2
- *  Example: ,$4G8P,G1S6V0,,33,03,,1152,,4143,,12043,,03618,,2461,,2186,,22803,,34120,,1204,,2065,,21287,,04415*,7253,
+ * When 2 GPS units are sending data to the teensy at once and then I try to print out the data
+ * received from the GPS units separately, the GPS data from both units gets printed simultaneously
+ * and are displayed with the data mixed together.
+ * Example: ,$4G8P,G1S6V0,,33,03,,1152,,4143,,12043,,03618,,2461,,2186,,22803,,34120,,1204,,2065,,21287,,04415*,7253,
  *  
- *  Known issue is when cansniff() is uncommented, GPS values GPS values stop being printed to the console. The 
- *  frame that is printed by cansniff() gets printed hundreds of times per second instead.
  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!*/
 
 #include <FlexCAN_T4.h>        // FlexCan library for Teensy 4.0 and 4.1 ONLY
@@ -109,22 +110,24 @@ void loop(void) {
   // Print the info received from GPS and then send CANBUS packets with a max # of times per second
   if (millis() - gpsTimer > 2000) {
     gpsTimer = millis();          // Reset the timer
+    Serial.print("GPS Timer (ms): ");
+    Serial.print(gpsTimer);
     int gpsNum = 1;
     printGPSStats(GPS, gpsNum);
 
     // 2 CANBUS frames will be sent to include all data
     // Frame 1 includes hour, minute, seconds, fix, speed, angle
     // Frame 2 includes Latitude and Longitude
-    fillCanbusFrameOne(GPS, gpsNum);  // Fill CANBUS struct with 1st part of GPS1 data that we want to send
+    fillCanbusFrameOne(GPS, gpsNum, gpsTimer);  // Fill CANBUS struct with 1st part of GPS1 data that we want to send
     canbus.read(canMsg);          // CANBUS pin will read the canMsg struct just populated with data  
     Serial.println("____FRAME ONE___ "); canSniff();                 // Print out CAN frame
-    canbus.write(canMsg);         // CANBUS pin will send CANBUS packet
+    canbus.write(canMsg);         // Send packet over CANBUS
 
 
-    fillCanbusFrameTwo(GPS, gpsNum);  // Fill CANBUS struct with 2nd part of GPS1 data that we want to send
+    fillCanbusFrameTwo(GPS, gpsNum, gpsTimer);  // Fill CANBUS struct with 2nd part of GPS1 data that we want to send
     canbus.read(canMsg);        // CANBUS pin will read the canMsg struct just populated with data  
     Serial.println("____FRAME TWO___ "); canSniff();               // Print out CAN frame
-    canbus.write(canMsg);       // CANBUS pin will send CANBUS packet
+    canbus.write(canMsg);       // Send packet over CANBUS
 
     /*
     Maybe here I can fill another CANBUS frame with Day, Month, and Year and send that too.
@@ -176,17 +179,17 @@ void loop(void) {
 
 
 
-void fillCanbusFrameOne(Adafruit_GPS GPS, int gpsNum) {
+void fillCanbusFrameOne(Adafruit_GPS GPS, int gpsNum, uint32_t gpsTimer) {
   canMsg.flags.extended = 0;
   canMsg.flags.remote = 0;
   
   if (gpsNum == 1)
-    canMsg.id = 0x35;   // The gps_lap_timer.cpp code is looking for these hex values
+    canMsg.id = 0x35;        // The gps_lap_timer.cpp code is looking for these hex values
    else
     canMsg.id = 0x37;
   
-  canMsg.buf[0] = GPS.hour;
-  canMsg.buf[1] = GPS.minute;
+  canMsg.buf[0] = GPS.hour;     // The CAN_message_t struct also contains a uint16_t timespamp field that may be able
+  canMsg.buf[1] = GPS.minute;   // to be used in place of GPS.hour, GPS.minute, and GPS.second
   canMsg.buf[2] = GPS.seconds;
   canMsg.buf[3] = GPS.fix;
   canMsg.buf[4] = GPS.speed;
@@ -199,9 +202,10 @@ void fillCanbusFrameOne(Adafruit_GPS GPS, int gpsNum) {
 
 
 
-void fillCanbusFrameTwo(Adafruit_GPS GPS, int gpsNum) {
+void fillCanbusFrameTwo(Adafruit_GPS GPS, int gpsNum, uint32_t gpsTimer) {
   canMsg.flags.extended = 0;
   canMsg.flags.remote = 0;
+  canMsg.timestamp = gpsTimer;
   
   if (gpsNum == 1)
     canMsg.id = 0x36;
@@ -216,8 +220,8 @@ void fillCanbusFrameTwo(Adafruit_GPS GPS, int gpsNum) {
     longitude = longitude * -1;
 
   canMsg.buf[0] = (int8_t)(latitude >> 24); // Latitude & Longitude are stored in big endian format
-  canMsg.buf[1] = (int8_t)(latitude >> 16);
-  canMsg.buf[2] = (int8_t)(latitude >> 8);
+  canMsg.buf[1] = (int8_t)(latitude >> 16); // Lat & Lon is in Degrees, minutes, seconds format. NOT decimal format
+  canMsg.buf[2] = (int8_t)(latitude >> 8); 
   canMsg.buf[3] = (int8_t)latitude;
   canMsg.buf[4] = (int8_t)(longitude >> 24);
   canMsg.buf[5] = (int8_t)(longitude >> 16);
@@ -280,11 +284,15 @@ void canSniff() {
 }
 
 // TODO
-/*
- * If the GPS loses power after getting a fix but the rest of the DAS (TX2, Teensy, HUD) are still powered on,
+/* If the GPS loses power after getting a fix but the rest of the DAS (TX2, Teensy, HUD) are still powered on,
  * then this code will keep sending CANBUS frames filled with the last data it recieved. Deal with this possible
- * situation by sending out CANBUS frames that are filled with 0's in the data fields
- * 
- * 
- * */
- */
+ * situation by sending out CANBUS frames that are filled with 0's in the data fields. */
+  
+// Teensy should only send out CANBUS frames when new data from the GPS is received.
+
+/* Teensy needs to read GPS data from one unit, send it, then read GPS data from the other (2nd)
+ unit and then send that to. Then repeat that process in that order. */
+
+ // GPS.milliseconds is always zero. Fix that
+
+ // Send GPS.milliseconds in the CANBUS packet. Then make sure gps_lap_timer.cpp reads the packet correctly.
