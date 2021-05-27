@@ -1,241 +1,231 @@
 /******************************************************************************************************************************************
  *  This code only works in the PST time zone
  * 
- * This code's goal is to read the CANBUS packets sent from the Adafruit GPS units and use it to calculate the number of laps, lap times,
+ * This code's goal is to read the CANBUS frames sent from the Adafruit GPS units and use it to calculate the number of laps, lap times,
  * & best lap time. That requires this program to know the cars ground location, the ground location of the start/finish line. This program
  * will know when the car has crossed the start/finish line by drawing a line between its current GPS position and its previous GPS
  * location and then checking to see if that line intersects with the start/finish line.
  * 
- * Need to verify that sending gps data to the server works
- * Now im working on getting my program to compile.
- * I need to find out what the idFilter parameter in getData() is used for
- * Im trying to find a way to read canbus packets in ROS while loop
- * I was on line 88 and i was wondering if i should send data to sioSender or process the gps data before establishing startline
+ * Sending GPS data from the units to the server works without crashing.
  * 
- * Compiles. EstablishStartline() & Startline() logic is there. Started to write code for reading all 4 canbus packets from 2 gps units.
- * 
- * Does the gps give all of its sentences the same timestamp? I want to know if all 4 of the CANBUS packets ill be sending to the TX2 in
- * one iteration of the while loop in the teensy code will all have the same timestamp.  
+ * Next Task: Make it so the same CANBUS packets arent sent more than once
+ *   
 *******************************************************************************************************************************************/
 
 #include "ros/ros.h"
-#include <fsae_electric_vehicle/gps.h> /* This gps.h is actually referencing 'gps.msg' file in msg folder.
-Idk why its like this but it wont compile without it */
 #include <cstdio>
 #include <cstring>
 #include <cstdlib>
-#include <iostream>
-#include <cstdint>
 #include <cassert>
 #include <math.h>
 #include <array>
-#include "CANController.h"
-//#include "gps_timer.h"
-#include "GPS.h"
+#include "GPS.h" // Custom header
+#include <thread>
+#include <chrono>
+
+#ifdef _WIN32	// If in a Windows environment
+#include <Windows.h>
+#else
+#include <unistd.h>
+#endif
 
 #define _CRT_SECURE_NO_WARNINGS // For MSVC
 
-// Coordinate of start/finish location.
-point_t startPoint;
-// Startline endpoints.
-line_t startingLine;
-// Heading crossing start/finish.
-uint16_t startHeading;
-// Coordinates of current & previous GPS location.
-line_t carCoordinates;
+point_t startPoint;		// Coordinate of start/finish location.
+line_t startLine;		// startLine defined by two points
+uint16_t startHeading;	// Heading crossing start/finish.
+line_t carCoordinates;	// Coordinates of current & previous GPS location.
 
-// File input buffer.
-//char buffer[GPS_STRING_LENGTH];
+err error;	// GPS errors
 
-// GPS errors.
-err error;
+
 
 int main(int argc, char **argv)
 {
 	std::cout << "In glt main\n" << std::endl;
 	ROS_INFO("In glt main\n");
+
+	// Stuff to make this a ROS node
 	ros::init(argc, argv, "gps_lap_timer");
 	ros::NodeHandle n;
   	ros::Publisher gps_lap_timer_pub = n.advertise<fsae_electric_vehicle::gps>("gps_lap_timer", 1000);
-  	fsae_electric_vehicle::gps gps_lap_timer; // constructor
+  	fsae_electric_vehicle::gps gps_lap_timer; // Struct used for sending GPS data to the sioSender.cpp ROS node
 
     // Start the CABUS header on the Jetson/Quasar board
 	CANController can;
 	can.start("can0");
 
-	// One pair contains two CANBUS frames of GPS data from one GPS update cycle (from one GPRMC sentence) from one of the two physical GPS units
-	std::pair<CANData, CANData> gpsUnitOneData; // Store frame with lower id on the left (first) the one with higher id that contains
-	std::pair<CANData, CANData> gpsUnitTwoData; // lat & lon data on on the right (second)
+	// One pair contains two CANBUS frames of GPS data from one GPRMC sentence. Each GPS unit emits one GPRMC sentence at a fixed frequency
+	// Store frame with lower id on the left (first) the one with higher id that contains lat & lon data on on the right (second)
+	std::pair<std::optional<CANData>, std::optional<CANData>> gpsUnitOneData; 
+	std::pair<std::optional<CANData>, std::optional<CANData>> gpsUnitTwoData;
 
-	// Wait for GPS fix
-	do { // Maybe replace this while loop with a function that waits to save cpu cycles
-		// Read CANBUS packets that contain GPS_FIX data (not the packets that contain lat/lon data)
-		std::optional<CANData> canData = can.getData(0x35, 0x1FFFFFFF);
+	// Wait for GPS fix. Maybe replace this while loop with a function that waits to save cpu cycles
+	do {
+		std::optional<CANData> canData = can.getData(GPS_ONE_FRAME_ONE_ID, 0x1FFFFFFF); // First param is the CAN frame ID, 2nd is ID mask
 		if (canData.has_value() && canData->data[GPS_FIX] == 1)
 			break; // No need to copy frames into gpsUnitOneData
 
-		std::optional<CANData> canData2 = can.getData(0x37, 0x1FFFFFFF);
+		std::optional<CANData> canData2 = can.getData(GPS_TWO_FRAME_ONE_ID, 0x1FFFFFFF);
 		if (canData2.has_value() && canData2->data[GPS_FIX] == 1)
 			break; // No need to copy frames into gpsUnitTwoData
 
 		ROS_DEBUG("Waiting for GPS fix!\n");
 		std::cout << "Waiting for GPS fix! c\n" << std::endl;
+		std::this_thread::sleep_for(std::chrono::milliseconds(500));
 	} while (true);
 	std::cout << "\nGPS Found Fix!";
+	ROS_INFO("Found FIX!");
 
 	// If button is pressed to make startline
 	// This is set to true because there is no button to make the startline yet
 	if (true) {
 		// Fill up one GPSUpdateCycle struct with data from one gps cycle. Not data split from 2 cycles of the GPS while loop on Teensy
 		// While either pair is not full
-		while (!(gpsUnitOneData.first.valid && gpsUnitOneData.second.valid) || !(gpsUnitTwoData.first.valid && gpsUnitTwoData.second.valid)) {
-			//Look for packet 35
-			std::optional<CANData> canData = can.getData(0x35, 0x1FFFFFFF);
-			
-			// If packet 35 has been read
-			if (canData.has_value()) {
-				// Store frame in gpsUnitOneData
-				//gpsUnitOneData.first = canData;
-
-				// Clear the data from canData
-				canData.reset();
-
-				// Look for packet 36
-				std::optional<CANData> canData = can.getData(0x36, 0x1FFFFFFF);
-
-				// If packet 36 has been read
-				if (canData.has_value()) {
-					// Store frame in gpsUnitTwoData
-					//gpsUnitOneData.second = canData;
-
-					// Clear the data from canData
-					canData.reset();
-				}
-
-				// Send gps data to sioSender
-				
-				// Process gps data
-			}
-
-			std::optional<CANData> canData2 = can.getData(0x37, 0x1FFFFFFF);
-
-			if (canData2.has_value()) {
-				// Store frame in gpsUnitOneData
-				//gpsUnitTwoData.first = canData;
-
-				// Clear the data from canData
-				canData2.reset();
-
-				// Look for packet 38
-				std::optional<CANData> canData2 = can.getData(0x38, 0x1FFFFFFF);
-
-				// If packet 38 has been read
-				if (canData2.has_value()) {
-					// Store frame in gpsUnitTwoData
-					//gpsUnitTwoData.second = canData;
-				}
-
-				// Send gps data to sioSender
-
-				// Process gps data
-			}
+		while (!(gpsUnitOneData.first.has_value() && gpsUnitOneData.second.has_value()) || !(gpsUnitTwoData.first.has_value() && gpsUnitTwoData.second.has_value())) {
+			GetGPSData(&can, gpsUnitOneData, gpsUnitTwoData); // Read CANBUS frames from the CANBUS header
 		}
 
-		// Establish startline with one full pair
-		if (gpsUnitOneData.first.valid && gpsUnitOneData.second.valid)
+		// Establish startline using just one of the pairs
+		if (gpsUnitOneData.first.has_value() && gpsUnitOneData.second.has_value())
 			EstablishStartLine(gpsUnitOneData);
-		else if (gpsUnitTwoData.first.valid && gpsUnitTwoData.second.valid) 
+		else if (gpsUnitTwoData.first.has_value() && gpsUnitTwoData.second.has_value())
 			EstablishStartLine(gpsUnitTwoData);
 	}
 
-	ros::Rate loop_rate(30); // This means that loop rate can be up to 30 times per second
+	ros::Rate loop_rate(40); // This means that loop rate can be up to 30 times per second
   	
 	while (ros::ok()) {
 		ROS_INFO_ONCE("ROS is ok!");
 
-		// Fill up one GPSUpdateCycle struct with data from one gps cycle. Not data split from 2 cycles of the GPS while loop on Teensy
-		/*
-		Look for packet 35
-			if (packet 35 is read)
-				look for packet 36
-			send gps data to sioSender
-			process gps data
-		else (look for packet 37)
-			if (packet 37 is read)
-				look for packet 38
-			send gps data to sioSender
-			process gps data
-		*/
+		// Read CANBUS frames from the CANBUS header
+		GetGPSData(&can, gpsUnitOneData, gpsUnitTwoData);
 
-		// Read CANBUS packets from the CANBUS header
-		std::optional<CANData> canData = can.getData(0x35, 0x1FFFFFFF); // First param is the CAN frame ID, 2nd is ID mask.
-
-		// Store data in the CANBUS packet depending on which packet is recieved
-		if (canData.has_value() && canData->data[GPS_FIX]) {
-			int32_t latitude;	// latitude format: DDMM.MMMM		This represents Degrees and Minutes. No seconds
-			int32_t longitude;	// longitude format: DDDMM.MMMM
-
-			switch(canData->id) {
-				case 0x35:
-					[[fallthrough]]; // If id == 0x35 || 0x37
-				case 0x37:
-					gps_lap_timer.hours = canData->data[0];		// Time data
-					gps_lap_timer.minutes = canData->data[1];	// Time data
-					gps_lap_timer.seconds = canData->data[2];	// Time data
-					gps_lap_timer.fix = canData->data[3];
-					gps_lap_timer.speed = canData->data[4];
-					gps_lap_timer.heading = canData->data[5] & canData->data[6]; // This may cause gps_lap_timer.heading to be read wrong since its not a uint16_t
-					break;
-				case 0x36:
-					[[fallthrough]]; // If id == 0x36 || 0x38
-				case 0x38:
-					for (int i = 0; i < 4; i++) {
-						latitude = canData->data[i];
-						latitude = latitude << 8;
-					}
-					for (int i = 4; i < 8; i++) {
-						longitude = canData->data[i];
-						longitude = longitude << 8;
-					}
-					float flatitude = (float)(latitude / 10000);
-					float flongitude = (float)(longitude / 10000);
-					gps_lap_timer.latitude = latitude;
-					gps_lap_timer.longitude = longitude;
-					break;
-			}
-			gps_lap_timer_pub.publish(gps_lap_timer);
+		// Store data in the CANBUS frame depending on which frame is recieved
+		// Its ok if we have the first frame but not the second because we can verify that we still have fix.
+		// Its not ok if we have the 2nd frame and not the first because we cannot verify that we still have fix.
+		if (gpsUnitOneData.first.has_value() && gpsUnitOneData.first->valid && gpsUnitOneData.first->data[GPS_FIX]) {
+			FillRosMessageWithFrameOneData(&gps_lap_timer, gpsUnitOneData.first);
+			if (gpsUnitOneData.second.has_value() && gpsUnitOneData.second->valid)
+				FillRosMessageWithFrameTwoData(&gps_lap_timer, gpsUnitOneData.second);
+		} else if (gpsUnitTwoData.first.has_value() && gpsUnitTwoData.first->valid && gpsUnitTwoData.first->data[GPS_FIX]) {
+			FillRosMessageWithFrameOneData(&gps_lap_timer, gpsUnitTwoData.first);
+			if (gpsUnitTwoData.second.has_value() && gpsUnitTwoData.second->valid)
+				FillRosMessageWithFrameTwoData(&gps_lap_timer, gpsUnitTwoData.second);
 		}
+
+		// Send ROS message filled with GPS data to sioSender.cpp
+		gps_lap_timer_pub.publish(gps_lap_timer);
 
 		ros::spinOnce();
    		loop_rate.sleep();
-
-		/*
-		std::optional<CANData> canData = can.getData(0x36, 0x1FFFFFFF);
-		if (canData->valid) {
-			storeFrameData(&canbusFrame, gps_lap_timer); // has lines like... gps_lap_timer.hours canData[0];
-			gps_lap_timer_pub.publish(gps_lap_timer);
-		}
-		std::optional<CANData> canData = can.getData(0x37, 0x1FFFFFFF);
-		if (canData->valid) {
-			storeFrameData(&canbusFrame, gps_lap_timer); // has lines like... gps_lap_timer.hours canData[0];
-			gps_lap_timer_pub.publish(gps_lap_timer);
-		}
-		std::optional<CANData> canData = can.getData(0x38, 0x1FFFFFFF);
-		if (canData->valid) {
-			storeFrameData(&canbusFrame, gps_lap_timer); // has lines like... gps_lap_timer.hours canData[0];
-			gps_lap_timer_pub.publish(gps_lap_timer);
-		}
-		*/
   	}
 }
 
 
 
-static float EstablishStartLine(const std::pair<CANData, CANData> gpsUnitData) { // Might not need to pass in this canData
+// Partially fills the struct representing a ROS message with data from first GPS frame. Marks frame as invalid
+static void FillRosMessageWithFrameOneData(fsae_electric_vehicle::gps* gps_lap_timer, std::optional<CANData> frameOneData) { // This just needs an optional candata param not a pair
+	gps_lap_timer->hours = frameOneData->data[0];		// Time data
+	gps_lap_timer->minutes = frameOneData->data[1];		// Time data
+	gps_lap_timer->seconds = frameOneData->data[2];		// Time data
+	gps_lap_timer->fix = frameOneData->data[3];
+	gps_lap_timer->speed = frameOneData->data[4];
+	gps_lap_timer->heading = frameOneData->data[5] & frameOneData->data[6]; // This may cause gps_lap_timer.heading to be read wrong since its not a uint16_t
+
+	frameOneData->valid = false; // Mark frame as invalid
+}
+
+
+
+// Partially fills the struct representing a ROS message with data from second GPS frame. Marks frame as invalid
+static void FillRosMessageWithFrameTwoData(fsae_electric_vehicle::gps* gps_lap_timer, std::optional<CANData> frameTwoData) { // This just needs an optional candata param not a pair
+	int32_t latitude;	// latitude format: DDMM.MMMM		This represents Degrees and Minutes. No seconds
+	int32_t longitude;	// longitude format: DDDMM.MMMM
+
+	// Pull the latitude & longitude data from the frame	
+	for (int i = 0; i < 4; i++) {
+		latitude = frameTwoData->data[i];
+		latitude = latitude << 8;
+	}
+	for (int i = 4; i < 8; i++) {
+		longitude = frameTwoData->data[i];
+		longitude = longitude << 8;
+	}
+
+	// Interpret the lat & lon data 
+	float flatitude = static_cast<float>(latitude / 10000);
+	float flongitude = static_cast<float>(longitude / 10000);
+
+	// Put lat & lon into the struct representing a ROS message
+	gps_lap_timer->latitude = latitude;
+	gps_lap_timer->longitude = longitude;
+
+	// Mark frame as invalid
+	frameTwoData->valid = false;
+}
+
+
+
+static void GetGPSData(CANController* can,
+						std::pair<std::optional<CANData>, std::optional<CANData>> gpsUnitOneData,
+						std::pair<std::optional<CANData>, std::optional<CANData>> gpsUnitTwoData) { //  Need to pass pairs by reference
+
+	// Look for frame one (id = 0x35) from GPS unit one
+	std::optional<CANData> canData = can->getData(GPS_ONE_FRAME_ONE_ID, 0x1FFFFFFF);
+	
+	// If frame has been read
+	if (canData.has_value()) {
+		// Store frame in gpsUnitOneData
+		gpsUnitOneData.first = canData;
+
+		// Clear the data from canData
+		canData.reset();
+
+		// Look for frame two from GPS unit one
+		std::optional<CANData> canData = can->getData(GPS_ONE_FRAME_TWO_ID, 0x1FFFFFFF);
+
+		// If frame has been read
+		if (canData.has_value()) {
+			// Store frame in gpsUnitTwoData
+			gpsUnitOneData.second = canData;
+
+			// Clear the data from canData
+			//canData.reset();
+		}
+	} else { // Look for frame one from GPS unit two
+		std::optional<CANData> canData = can->getData(GPS_TWO_FRAME_ONE_ID, 0x1FFFFFFF);
+
+		// If frame has been read
+		if (canData.has_value()) {
+			// Store frame in gpsUnitTwoData
+			gpsUnitTwoData.first = canData;
+
+			// Clear the data from canData
+			canData.reset();
+
+			// Look for frame two from GPS unit two
+			std::optional<CANData> canData = can->getData(GPS_TWO_FRAME_TWO_ID, 0x1FFFFFFF);
+
+			// If frame has been read
+			if (canData.has_value()) {
+				// Store frame in gpsUnitTwoData
+				gpsUnitTwoData.second = canData;
+
+				// Dont need to clear the data from canData
+				//canData.reset();
+			}
+		}
+	}
+}
+
+
+
+static float EstablishStartLine(const std::pair<std::optional<CANData>, std::optional<CANData>> gpsUnitData) {
 	float posTimestamp, latitudeCoordinate, longitudeCoordinate;
 
 	// Verify that GPS has fix
-	if (!gpsUnitData.first.data[GPS_FIX])
+	if (!gpsUnitData.first->data[GPS_FIX])
 		return 0.0f;
 
 	// Position timestamp
@@ -246,7 +236,7 @@ static float EstablishStartLine(const std::pair<CANData, CANData> gpsUnitData) {
 	//startPoint.y = 
 
 	// Heading while crossing start/finish. Vehicle should be as parallel to the sides of the track as possible
-	startHeading = gpsUnitData.first.data[GPS_HEADING_1];
+	startHeading = gpsUnitData.first->data[GPS_HEADING_1];
 
 	// Define startline
 	StartLine(startPoint, (float)startHeading);
@@ -392,7 +382,7 @@ for the start line. The start line length will have to represent about 20-50 fee
 
 // Construct a startline.
 static void StartLine(const point_t headingLineCoor, const float sHeading) {
-	point_t headingLineCoor2;	// Second pair of coodinates that defines an infinite imaginary line (headingLine) pointing in the direction the car is facing
+	point_t headingLineCoor2;	// Second pair of coodinates that defines an infinite imaginary line (headingLine) lying in the direction the car is facing
 	float m, b, temp;			// Slope & y-intercept of that line
 
 	// Create another (x,y) coordinate that lies in the same line as headingLine
@@ -412,11 +402,11 @@ static void StartLine(const point_t headingLineCoor, const float sHeading) {
 	// Define endpoints of the perpendicular line (start line)
 	// I think this defines the endpoints hundreds of miles apart due to LINE_WIDTH_2 being too big. Should be < 1
 	temp = headingLineCoor.x + LINE_WIDTH_2;
-	startingLine.p0.y = (m * temp + b);
-	startingLine.p0.x = temp;
+	startLine.p0.y = (m * temp + b);
+	startLine.p0.x = temp;
 	temp -= LINE_WIDTH;
-	startingLine.p1.y = (m * temp + b);
-	startingLine.p1.x = temp;
+	startLine.p1.y = (m * temp + b);
+	startLine.p1.x = temp;
 }
 
 
@@ -427,35 +417,35 @@ static bool LineIntersection(const line_t carCoordinates) {
 	int16_t s1, s2, s3, s4;
 
 	// Quick rejection test.
-	if (!(MAX(startingLine.p0.x, startingLine.p1.x) >= MIN(carCoordinates.p0.x, carCoordinates.p1.x) &&
-		MAX(carCoordinates.p0.x, carCoordinates.p1.x) >= MIN(startingLine.p0.x, startingLine.p1.x) &&
-		MAX(startingLine.p0.y, startingLine.p1.y) >= MIN(carCoordinates.p0.y, carCoordinates.p1.y) &&
-		MAX(carCoordinates.p0.y, carCoordinates.p1.y) >= MIN(startingLine.p0.y, startingLine.p1.y)))
+	if (!(MAX(startLine.p0.x, startLine.p1.x) >= MIN(carCoordinates.p0.x, carCoordinates.p1.x) &&
+		MAX(carCoordinates.p0.x, carCoordinates.p1.x) >= MIN(startLine.p0.x, startLine.p1.x) &&
+		MAX(startLine.p0.y, startLine.p1.y) >= MIN(carCoordinates.p0.y, carCoordinates.p1.y) &&
+		MAX(carCoordinates.p0.y, carCoordinates.p1.y) >= MIN(startLine.p0.y, startLine.p1.y)))
 		return false;
 
 	// Check to see if lines are collinear
-	if ((z = ((carCoordinates.p0.x - startingLine.p0.x) * (startingLine.p1.y - startingLine.p0.y)) - ((carCoordinates.p0.y - startingLine.p0.y) * (startingLine.p1.x - startingLine.p0.x))) < 0.0f)
+	if ((z = ((carCoordinates.p0.x - startLine.p0.x) * (startLine.p1.y - startLine.p0.y)) - ((carCoordinates.p0.y - startLine.p0.y) * (startLine.p1.x - startLine.p0.x))) < 0.0f)
 		s1 = -1; // Counterclockwise.
 	else if (z > 0.0f)
 		s1 = 1;  // Clockwise.
 	else
 		s1 = 0;  // Collinear.
 
-	if ((z = ((carCoordinates.p1.x - startingLine.p0.x) * (startingLine.p1.y - startingLine.p0.y)) - ((carCoordinates.p1.y - startingLine.p0.y) * (startingLine.p1.x - startingLine.p0.x))) < 0.0f)
+	if ((z = ((carCoordinates.p1.x - startLine.p0.x) * (startLine.p1.y - startLine.p0.y)) - ((carCoordinates.p1.y - startLine.p0.y) * (startLine.p1.x - startLine.p0.x))) < 0.0f)
 		s2 = -1;
 	else if (z > 0.0f)
 		s2 = 1;
 	else
 		s2 = 0;
 
-	if ((z = ((startingLine.p0.x - carCoordinates.p0.x) * (carCoordinates.p1.y - carCoordinates.p0.y)) - ((startingLine.p0.y - carCoordinates.p0.y) * (carCoordinates.p1.x - carCoordinates.p0.x))) < 0.0f)
+	if ((z = ((startLine.p0.x - carCoordinates.p0.x) * (carCoordinates.p1.y - carCoordinates.p0.y)) - ((startLine.p0.y - carCoordinates.p0.y) * (carCoordinates.p1.x - carCoordinates.p0.x))) < 0.0f)
 		s3 = -1;
 	else if (z > 0.0f)
 		s3 = 1;
 	else
 		s3 = 0;
 
-	if ((z = ((startingLine.p1.x - carCoordinates.p0.x) * (carCoordinates.p1.y - carCoordinates.p0.y)) - ((startingLine.p1.y - carCoordinates.p0.y) * (carCoordinates.p1.x - carCoordinates.p0.x))) < 0.0f)
+	if ((z = ((startLine.p1.x - carCoordinates.p0.x) * (carCoordinates.p1.y - carCoordinates.p0.y)) - ((startLine.p1.y - carCoordinates.p0.y) * (carCoordinates.p1.x - carCoordinates.p0.x))) < 0.0f)
 		s4 = -1;
 	else if (z > 0.0f)
 		s4 = 1;
@@ -475,8 +465,8 @@ static void IntersectPoint(const point_t p1, const point_t p2, point_t* intersec
 	float denom, numera, mua; //numerb, mub;
 
 	// No checks because it is assumed the lines intersect.
-	denom = (startingLine.p1.y - startingLine.p0.y) * (p2.x - p1.x) - (startingLine.p1.x - startingLine.p0.x) * (p2.y - p1.y); // y - Py
-	numera = (startingLine.p1.x - startingLine.p0.x) * (p1.y - startingLine.p0.y) - (startingLine.p1.y - startingLine.p0.y) * (p1.x - startingLine.p0.x); // x - Px
+	denom = (startLine.p1.y - startLine.p0.y) * (p2.x - p1.x) - (startLine.p1.x - startLine.p0.x) * (p2.y - p1.y); // y - Py
+	numera = (startLine.p1.x - startLine.p0.x) * (p1.y - startLine.p0.y) - (startLine.p1.y - startLine.p0.y) * (p1.x - startLine.p0.x); // x - Px
 	//numerb = (p2.x - p1.x)*(p1.y - startingLine1.y) - (p2.y - p1.y)*(p1.x - startingLine1.x);
 
 	mua = numera / denom; // Calculate the slope
@@ -710,12 +700,14 @@ static void DisplayTime(const uint8_t n, const float ft) {
 // Need to create an object called RacingSession that will hold various different races. Races will be made up of laps.
 // Should be able to start & end racing session
 
-/* This program needs to read all CANBUS packets that pertain to the GPS units. That means reading ALL CANBUS packets that it sees
-and then filtering out the ones that it wants based on the packet ID.
+/* This program needs to read all CANBUS frames that pertain to the GPS units. That means reading ALL CANBUS frames that it sees
+and then filtering out the ones that it wants based on the frame ID.
 can.getData() reads frames from an std::vector<> called m_dataMap which is defined in CANController.h. That is a vector of CANData
 objects. Each object represents a CANBUS frame with a specific ID. When a new CANBUS frame is read from the header, that frame
 will replace the frame/object if it already exists in the std::vector<> m_dataMap. So there will be no two elements within m_dataMap
 that contain a CANBUS frame with the same ID, or in other words old CANBUS frames are immediately overwritten in favor of new frames.
+Also whenever CANController::getData() is called, if the sought after frame is found then it is returned and marked as invalid within
+std::vector<> m_dataMap. So if that same frame is searched for again, it will not be returned because it is marked as invalid.
 Can the this function call "can.getData(0x37, 0x1FFFFFFF);" be used to filter out several message
 IDs at once or do I have to call that function separately for each can frame i want to filter out? */
 
@@ -723,9 +715,22 @@ IDs at once or do I have to call that function separately for each can frame i w
 
 // Figure out a way to trigger new lap as accurately as possible
 
-// Create an std::array<CANData, 2> filled with the 2 canbus packets that are sent by one GPS unit. Maybe name it GPSUpdateCycle.
+// Create an std::array<CANData, 2> filled with the 2 canbus frames that are sent by one GPS unit. Maybe name it GPSUpdateCycle.
 
-// Data that will also need to be sent to the server from this program will be lap #, lap time, best lap, best time, 
+// Data that will also need to be sent to the server from this program will be lap #, lap time, best lap, best time,
+
+// i was wondering if i should send data to sioSender or process the gps data before establishing startline
+
+/* There may be an issue where the frames stored in gpsUnitOneData pair may be from different GPRMC sentences. For example the 
+ first frame may be read & stored in the gpsUnitOneData pair successfully but then for whatever reason the second frame may not
+ be read or stored successfully. At that point the gpsUnitOneData will only have the first frame stored and the second member of
+ the pair will be empty. The data from the 2nd GPS unit will then try to be read and stored successfully. Then we will expect to 
+ receive and store frame one again from the first GPS unit, but if that doesnt happen successfully for whatever reason then it
+ would be possible to read and store the 2nd frame from GPS unit one and then at that point we would have gpsUnitOneData.first be
+ from an old GPRMC sentence that is invalid now. */
+
+/* Does the gps give all of its sentences the same timestamp? I want to know if all 4 of the CANBUS frames ill be sending to the TX2 in
+one iteration of the while loop in the teensy code will all have the same timestamp. */
 
 
 /******************************************************* Unused code *************************************************************

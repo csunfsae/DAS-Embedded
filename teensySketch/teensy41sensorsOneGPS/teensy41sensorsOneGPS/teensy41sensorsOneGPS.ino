@@ -22,39 +22,42 @@
  *  
  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!*/
 
-#include <FlexCAN_T4.h>        // FlexCan library for Teensy 4.0 and 4.1 ONLY
+// TEENSY SENDS GPS DATA TO SERVER. LAT & LON ARE NOT CORRECT. 
+
+#include <FlexCAN_T4.h>               // FlexCan library for Teensy 4.0 and 4.1 ONLY
 #include <Adafruit_GPS.h>
 
 // Set GPSECHO to 'false' to turn off echoing the GPS data to the arduino Serial console
 // Set to 'true' if you want to debug and listen to the raw GPS sentences
 #define GPSECHO true
-#define GPSSerial2 Serial2      // Hardware serial ports on Teensy 4.1
+#define GPSSerial2 Serial2            // Hardware serial ports on Teensy 4.1
+#define GPSSerial1 Serial1
 
-const int ledPin =  LED_BUILTIN;        // The pin number for LED
-int ledState = LOW;                     // ledState used to set the LED
-const long interval = 1000;             // Interval at which to blink LED on Teensy (milliseconds)
-unsigned long previousMillis = 0;       // Will store last time the Teensy LED was updated
+const int ledPin =  LED_BUILTIN;      // The pin number for LED
+int ledState = LOW;                   // ledState used to set the LED
+const long interval = 1000;           // Interval at which to blink LED on Teensy (milliseconds)
+unsigned long previousMillis = 0;     // Will store last time the Teensy LED was updated
 
-static CAN_message_t canMsg;            // Structure of a CANBUS message that is sent over Teensy CANBUS port
-uint32_t gpsTimer = millis();           // Used for printing & sending GPS data once per unit of time
+static CAN_message_t canMsg;          // Structure of a CANBUS message that is sent over Teensy CANBUS port
+uint32_t gpsTimer = millis();         // Used for printing & sending GPS data once per unit of time
 
-FlexCAN_T4<CAN2, RX_SIZE_256, TX_SIZE_16> canbus; /* CAN2 is Teensy4.1 pins 0 & 1.
+FlexCAN_T4<CAN1, RX_SIZE_256, TX_SIZE_16> canbus; /* CAN2 is Teensy4.1 pins 0 & 1.
                                                      CAN3 pins support regular CAN2.0 and CANFD modes */
 
-Adafruit_GPS GPS(&GPSSerial2);      // Connect to the GPS units on separate hardware serial ports
+Adafruit_GPS GPS(&GPSSerial2);        // Connect to the GPS units on separate hardware serial ports
 //Adafruit_GPS GPS2(&GPSSerial1);
 
 
 
-// ----------------------------------------------------------------------------------------------------------------------------------
+// -------------------------------------------------------------------------------------------------------------------
 void setup(void)
 {
   Serial.println("Adafruit GPS basic test!");
-  Serial.begin(9600);     // Initiate serial ports with baud rate of 9600
+  Serial.begin(9600);         // Allows arduino (not Teensy) to communicate with the arduino serial monitor
   pinMode(ledPin, OUTPUT);    // Set the digital pin as output
   canbus.begin();
-  canbus.setBaudRate(500000);   // This value has to match the baud rate on the Quasar/Jetson TX2 board
-  GPS.begin(9600);        // 9600 NMEA is the default baud rate for Adafruit MTK GPS's - some use 4800
+  canbus.setBaudRate(500000); // This value has to match the baud rate on the Quasar/Jetson TX2 board
+  GPS.begin(9600);            // 9600 NMEA is the default baud rate for Adafruit MTK GPS's - some use 4800
 
   // Uncomment this line to turn on RMC (recommended minimum) and GGA (fix data) including altitude
   //GPS.sendCommand(PMTK_SET_NMEA_OUTPUT_RMCGGA);
@@ -75,8 +78,9 @@ void setup(void)
 
 
 
-// -----------------------------------------------------------------------------------------------------------------------------------
-void loop(void) {
+// -------------------------------------------------------------------------------------------------------------------
+void loop(void)
+{
   // Blink the LED
   unsigned long currentMillis = millis();
   if (currentMillis - previousMillis >= interval) {
@@ -93,8 +97,9 @@ void loop(void) {
 
   // Print out raw GPS data to audino serial console for each GPS separately
   char c = GPS.read();
-  if ((c) && (GPSECHO))
+  if ((c) && (GPSECHO)) {
     Serial.write(c);
+  }
 
   // A tricky thing here is if we print the NMEA sentence, or data
   // we end up not listening and catching other sentences!
