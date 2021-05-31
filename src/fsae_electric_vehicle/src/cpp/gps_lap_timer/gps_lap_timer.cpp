@@ -55,12 +55,15 @@ int main(int argc, char **argv)
 	CANController can;
 	can.start("can0");
 
+	// 2 CANBUS frames will need to be received in order to get all the data from one GPRMC sentence
+    // Frame 1 includes hour, minute, seconds, fix, speed, and angle
+    // Frame 2 includes Latitude and Longitude
 	// One pair contains two CANBUS frames of GPS data from one GPRMC sentence. Each GPS unit emits one GPRMC sentence at a fixed frequency
 	// Store frame with lower id on the left (first) the one with higher id that contains lat & lon data on on the right (second)
 	std::pair<std::optional<CANData>, std::optional<CANData>> gpsUnitOneData; 
 	std::pair<std::optional<CANData>, std::optional<CANData>> gpsUnitTwoData;
 
-	// Wait for GPS fix. Maybe replace this while loop with a function that waits to save cpu cycles
+	// Wait for GPS fix
 	do {
 		std::optional<CANData> canData = can.getData(GPS_ONE_FRAME_ONE_ID, 0x1FFFFFFF); // First param is the CAN frame ID, 2nd is ID mask
 		if (canData.has_value() && canData->data[GPS_FIX] == 1)
@@ -77,14 +80,12 @@ int main(int argc, char **argv)
 	std::cout << "\nGPS Found Fix!";
 	ROS_INFO("Found FIX!");
 
-	// If button is pressed to make startline
-	// This is set to true because there is no button to make the startline yet
+	// If button is pressed to make start line. This is set to true because there is no button to make the startline yet
 	if (true) {
 		// Fill up one GPSUpdateCycle struct with data from one gps cycle. Not data split from 2 cycles of the GPS while loop on Teensy
 		// While either pair is not full
-		while (!(gpsUnitOneData.first.has_value() && gpsUnitOneData.second.has_value()) || !(gpsUnitTwoData.first.has_value() && gpsUnitTwoData.second.has_value())) {
-			GetGPSData(&can, gpsUnitOneData, gpsUnitTwoData); // Read CANBUS frames from the CANBUS header
-		}
+		while ((gpsUnitOneData.first.has_value() && gpsUnitOneData.second.has_value()) || (gpsUnitTwoData.first.has_value() && gpsUnitTwoData.second.has_value()))
+			GetGPSData(&can, gpsUnitOneData, gpsUnitTwoData);
 
 		// Establish startline using just one of the pairs
 		if (gpsUnitOneData.first.has_value() && gpsUnitOneData.second.has_value())
@@ -120,6 +121,117 @@ int main(int argc, char **argv)
 		ros::spinOnce();
    		loop_rate.sleep();
   	}
+}
+
+
+
+// Read CANBUS frames from the CANBUS header
+static void GetGPSData(CANController* can,
+						std::pair<std::optional<CANData>, std::optional<CANData>> gpsUnitOneData,
+						std::pair<std::optional<CANData>, std::optional<CANData>> gpsUnitTwoData) { //  Need to pass pairs by reference
+
+	// Look for frame one (id = 0x35) from GPS unit one
+	std::optional<CANData> canData = can->getData(GPS_ONE_FRAME_ONE_ID, 0x1FFFFFFF);
+	
+	if (canData.has_value()) { 			// If frame has been read
+		gpsUnitOneData.first = canData; // Store frame in gpsUnitOneData
+
+		canData.reset();				// Clear the data from canData
+
+		std::optional<CANData> canData = can->getData(GPS_ONE_FRAME_TWO_ID, 0x1FFFFFFF); // Look for frame two from GPS unit one
+
+		if (canData.has_value())				// If frame has been read
+			gpsUnitOneData.second = canData;	// Store frame in gpsUnitTwoData
+
+	} else { // Look for frame one from GPS unit two
+		std::optional<CANData> canData = can->getData(GPS_TWO_FRAME_ONE_ID, 0x1FFFFFFF);
+
+		if (canData.has_value()) {				// If frame has been read
+			gpsUnitTwoData.first = canData;		// Store frame in gpsUnitTwoData
+
+			canData.reset();					// Clear the data from canData
+
+			std::optional<CANData> canData = can->getData(GPS_TWO_FRAME_TWO_ID, 0x1FFFFFFF); // Look for frame two from GPS unit two
+
+			if (canData.has_value())				// If frame has been read
+				gpsUnitTwoData.second = canData;	// Store frame in gpsUnitTwoData
+		}
+	}
+}
+
+
+
+static float EstablishStartLine(const std::pair<std::optional<CANData>, std::optional<CANData>> gpsUnitData) {
+	float posTimestamp, latitudeCoordinate, longitudeCoordinate;
+
+	// Verify that GPS has fix
+	if (!gpsUnitData.first->data[GPS_FIX])
+		return 0.0f;
+
+	// Position timestamp
+	posTimestamp = ConvertToSeconds(gpsUnitData.first->timestamp);
+
+	// Get current carCoordinates position (lat, long) by reading canbus header. startHeading = canData->data[GPS_HEADING_1];
+	//startPoint.x = 
+	//startPoint.y = 
+
+	// Heading while crossing start/finish. Vehicle should be as parallel to the sides of the track as possible
+	startHeading = gpsUnitData.first->data[GPS_HEADING_1];
+
+	// Define startline
+	StartLine(startPoint, (float)startHeading);
+
+	// Set the current carCoordinates position
+	carCoordinates.p0.x = startPoint.x;
+	carCoordinates.p0.y = startPoint.y;
+
+	return posTimestamp;
+}
+
+
+
+/*
+So to create a start line we need to represent the start line as a pair of x & y coordinates. The GPS coordinates of the vehicle will
+act as the x & y coordinates. Using 2 coordinates can only represent an opject in a 2d plane, but since the distances we are dealing
+with are so small relative to the circumference of the earth, using 2 GPS coordinates will work just fine. Tracking the position of
+a vehicle going long distances in a single direction on the surface of the Earth will not work with this program because the Earth
+is not flat. #FlatEarthSociety This program doesnt prove that the Earth is round though so the flat earthers win again. So to create
+the startline we need to first create a line that lies in the direction that the car is facing. That line will be called headingLine.
+One (x,y) coordinate of headingLine will be the GPS coordinates of the car. The 2nd (x,y) coordinate will need to be created. Once we
+have that headingLine defined then we can go ahead and create a new line called start Line that lies perpendicular to headingLine &
+the intersection point will be the GPS coordinates of the car when the EstablishStartLine function is called. The start line cannot
+be an infinite line or else the car will cross that infinite start line at least twice during every lap so we need to define endpoints
+for the start line. The start line length will have to represent about 20-50 feet in the real world, which will translate to about
+0.000110 degrees in GPS coordinates. The length of the startline should be user defineable.
+*/
+
+// Construct a startline.
+static void StartLine(const point_t headingLineCoor, const float sHeading) {
+	point_t headingLineCoor2;	// Second pair of coodinates that defines an infinite imaginary line (headingLine) lying in the direction the car is facing
+	float m, b, temp;			// Slope & y-intercept of that line
+
+	// Create another (x,y) coordinate that lies in the same line as headingLine
+	// This creates a line in our imaginary 2d plane that points in the direction the car is facing
+	// This line is used for creating a startline that is perpendicular to this one that is being created
+	headingLineCoor2.x = headingLineCoor.x + PROJECTION_DISTANCE * cos(DEGTORAD(sHeading));
+	headingLineCoor2.y = headingLineCoor.y + PROJECTION_DISTANCE * sin(DEGTORAD(sHeading));
+	
+	// Calculate the slope & y-intercept of headingLine 
+	m = (headingLineCoor.y - headingLineCoor2.y) / (headingLineCoor.x - headingLineCoor2.x);
+	b = headingLineCoor.y - (m * headingLineCoor.x); // I dont think i need this line because this b is immediately redefined below
+
+	// Construct the perpendicular line (start line) slope & y-intercept.
+	m = -1.0f / m;
+	b = headingLineCoor.y - (m * headingLineCoor.x);
+
+	// Define endpoints of the perpendicular line (start line)
+	// I think this defines the endpoints hundreds of miles apart due to LINE_WIDTH_2 being too big. Should be < 1
+	temp = headingLineCoor.x + LINE_WIDTH_2;
+	startLine.p0.y = (m * temp + b);
+	startLine.p0.x = temp;
+	temp -= LINE_WIDTH;
+	startLine.p1.y = (m * temp + b);
+	startLine.p1.x = temp;
 }
 
 
@@ -163,89 +275,6 @@ static void FillRosMessageWithFrameTwoData(fsae_electric_vehicle::gps* gps_lap_t
 
 	// Mark frame as invalid
 	frameTwoData->valid = false;
-}
-
-
-
-static void GetGPSData(CANController* can,
-						std::pair<std::optional<CANData>, std::optional<CANData>> gpsUnitOneData,
-						std::pair<std::optional<CANData>, std::optional<CANData>> gpsUnitTwoData) { //  Need to pass pairs by reference
-
-	// Look for frame one (id = 0x35) from GPS unit one
-	std::optional<CANData> canData = can->getData(GPS_ONE_FRAME_ONE_ID, 0x1FFFFFFF);
-	
-	// If frame has been read
-	if (canData.has_value()) {
-		// Store frame in gpsUnitOneData
-		gpsUnitOneData.first = canData;
-
-		// Clear the data from canData
-		canData.reset();
-
-		// Look for frame two from GPS unit one
-		std::optional<CANData> canData = can->getData(GPS_ONE_FRAME_TWO_ID, 0x1FFFFFFF);
-
-		// If frame has been read
-		if (canData.has_value()) {
-			// Store frame in gpsUnitTwoData
-			gpsUnitOneData.second = canData;
-
-			// Clear the data from canData
-			//canData.reset();
-		}
-	} else { // Look for frame one from GPS unit two
-		std::optional<CANData> canData = can->getData(GPS_TWO_FRAME_ONE_ID, 0x1FFFFFFF);
-
-		// If frame has been read
-		if (canData.has_value()) {
-			// Store frame in gpsUnitTwoData
-			gpsUnitTwoData.first = canData;
-
-			// Clear the data from canData
-			canData.reset();
-
-			// Look for frame two from GPS unit two
-			std::optional<CANData> canData = can->getData(GPS_TWO_FRAME_TWO_ID, 0x1FFFFFFF);
-
-			// If frame has been read
-			if (canData.has_value()) {
-				// Store frame in gpsUnitTwoData
-				gpsUnitTwoData.second = canData;
-
-				// Dont need to clear the data from canData
-				//canData.reset();
-			}
-		}
-	}
-}
-
-
-
-static float EstablishStartLine(const std::pair<std::optional<CANData>, std::optional<CANData>> gpsUnitData) {
-	float posTimestamp, latitudeCoordinate, longitudeCoordinate;
-
-	// Verify that GPS has fix
-	if (!gpsUnitData.first->data[GPS_FIX])
-		return 0.0f;
-
-	// Position timestamp
-	//posTimestamp = ConvertToSeconds(canData->data[GPS_HOUR]);
-
-	// Get current carCoordinates position (lat, long) by reading canbus header. startHeading = canData->data[GPS_HEADING_1];
-	//startPoint.x = 
-	//startPoint.y = 
-
-	// Heading while crossing start/finish. Vehicle should be as parallel to the sides of the track as possible
-	startHeading = gpsUnitData.first->data[GPS_HEADING_1];
-
-	// Define startline
-	StartLine(startPoint, (float)startHeading);
-
-	// Set the current carCoordinates position
-	carCoordinates.p0.x = startPoint.x;
-	carCoordinates.p0.y = startPoint.y;
-
-	return posTimestamp;
 }
 
 
@@ -365,51 +394,6 @@ static float Distance(const point_t t1, const point_t t2) {
 }
 
 
-/*
-So to create a start line we need to represent the start line as a pair of x & y coordinates. The GPS coordinates of the vehicle will
-act as the x & y coordinates. Using 2 coordinates can only represent an opject in a 2d plane, but since the distances we are dealing
-with are so small relative to the circumference of the earth, using 2 GPS coordinates will work just fine. Tracking the position of
-a vehicle going long distances in a single direction on the surface of the Earth will not work with this program because the Earth
-is not flat. #FlatEarthSociety This program doesnt prove that the Earth is round though so the flat earthers win again. So to create
-the startline we need to first create a line that lies in the direction that the car is facing. That line will be called headingLine.
-One (x,y) coordinate of headingLine will be the GPS coordinates of the car. The 2nd (x,y) coordinate will need to be created. Once we
-have that headingLine defined then we can go ahead and create a new line called start Line that lies perpendicular to headingLine &
-the intersection point will be the GPS coordinates of the car when the EstablishStartLine function is called. The start line cannot
-be an infinite line or else the car will cross that infinite start line at least twice during every lap so we need to define endpoints
-for the start line. The start line length will have to represent about 20-50 feet in the real world, which will translate to about
-0.000110 degrees in GPS coordinates. The length of the startline should be user defineable.
-*/
-
-// Construct a startline.
-static void StartLine(const point_t headingLineCoor, const float sHeading) {
-	point_t headingLineCoor2;	// Second pair of coodinates that defines an infinite imaginary line (headingLine) lying in the direction the car is facing
-	float m, b, temp;			// Slope & y-intercept of that line
-
-	// Create another (x,y) coordinate that lies in the same line as headingLine
-	// This creates a line in our imaginary 2d plane that points in the direction the car is facing
-	// This line is used for creating a startline that is perpendicular to this one that is being created
-	headingLineCoor2.x = headingLineCoor.x + PROJECTION_DISTANCE * cos(DEGTORAD(sHeading));
-	headingLineCoor2.y = headingLineCoor.y + PROJECTION_DISTANCE * sin(DEGTORAD(sHeading));
-	
-	// Calculate the slope & y-intercept of headingLine 
-	m = (headingLineCoor.y - headingLineCoor2.y) / (headingLineCoor.x - headingLineCoor2.x);
-	b = headingLineCoor.y - (m * headingLineCoor.x); // I dont think i need this line because this b is immediately redefined below
-
-	// Construct the perpendicular line (start line) slope & y-intercept.
-	m = -1.0f / m;
-	b = headingLineCoor.y - (m * headingLineCoor.x);
-
-	// Define endpoints of the perpendicular line (start line)
-	// I think this defines the endpoints hundreds of miles apart due to LINE_WIDTH_2 being too big. Should be < 1
-	temp = headingLineCoor.x + LINE_WIDTH_2;
-	startLine.p0.y = (m * temp + b);
-	startLine.p0.x = temp;
-	temp -= LINE_WIDTH;
-	startLine.p1.y = (m * temp + b);
-	startLine.p1.x = temp;
-}
-
-
 
 // Check if the 2 lines intersect
 static bool LineIntersection(const line_t carCoordinates) {
@@ -476,104 +460,6 @@ static void IntersectPoint(const point_t p1, const point_t p2, point_t* intersec
 }
 
 
-/*************************************************** GPS Utility Functions *********************************************/
-static void DisplayTime(const uint8_t, const float);
-
-// A very basic atof function (no exponentials, no sign).
-static float atof_(char s[]) {
-	float val, power;
-	int8_t i = 0;
-
-	while (!isdigit(s[i]))
-		i++;
-
-	for (val = 0.0f; isdigit(s[i]); i++)
-		val = 10.0f * val + (s[i] - '0');
-
-	if (s[i] == '.')
-		i++;
-
-	for (power = 1.0f; isdigit(s[i]); i++)
-	{
-		val = 10.0f * val + (s[i] - '0');
-		power *= 10.0f;
-	}
-
-	return val / power;
-}
-
-
-
-// strtok implementation which recognizes consecutive delimiters.
-static char* strtok_(char* str, const char* delim) {
-	static char* staticStr = 0;          // Stores last address.
-	int i = 0, strLen = 0, delimLen = 0; // Indexes.
-
-	// If delimiter is NULL or no more chars remaining.
-	if (delim == 0 || (str == 0 && staticStr == 0))
-		return 0;
-
-	if (str == 0)
-		str = staticStr;
-
-	// Get length of string and delimiter.
-	while (str[strLen])
-		strLen++;
-	while (delim[delimLen])
-		delimLen++;
-
-	// Find a delimiter.
-	char* p = strpbrk(str, delim);
-	if (p)
-		i = p - str;
-	else
-	{
-		// If no delimiters, return str.
-		staticStr = 0;
-		return str;
-	}
-
-	// Terminate the string.
-	str[i] = '\0';
-
-	// Save remaining string.
-	if ((str + i + 1) != 0)
-		staticStr = (str + i + 1);
-	else
-		staticStr = 0;
-
-	return str;
-}
-
-
-
-// Convert hex string to decimal.
-static char hex(const char ch) {
-	if (ch >= '0' && ch <= '9')
-		return ch - '0';
-	if (ch >= 'a' && ch <= 'f')
-		return ch - 'a' + 10;
-
-	return 0;
-}
-
-
-/*P
-static float ConvertToSeconds(char* time) {
-	if (time == nullptr)
-		return 0.0f;
-
-	float timeHours = atof_(time);
-	
-	uint16_t hm = (uint16_t)(timeHours / 100);
-	uint16_t hours = (uint16_t)(ft / 10000);
-	uint16_t minutes = (hm - (hours * 100) + (hours * 60));
-	float seconds = ft - (hm * 100) + (minutes * 60);
-
-	return seconds;
-}
-*/
-
 
 // Determine if floats are relatively equal.
 static bool Equal(float a, float b) { return fabs(a - b) <= FLT_EPSILON; }
@@ -583,117 +469,6 @@ static bool Equal(float a, float b) { return fabs(a - b) <= FLT_EPSILON; }
 // Check if heading and angle are within 30 degrees of each other
 static bool Within30(const uint16_t a, const uint16_t h) { return ((360 - abs(a - h) % 360 < 30) || (abs(a - h) % 360 < 30)); }
 
-
-
-// Copy lat/long strings and format as ddd.dddd
-static void GeoCopy(const char* s, char* d, const unsigned char value) {
-	assert(s != nullptr && d != nullptr);
-
-	int i = 0;
-
-	// Copy all numerals, insert/skip decimal point.
-	do {
-		if (value == LONGITUDE && i == 3)
-		{
-			*d++ = '.';
-			i++;
-		}
-
-		if (value == LATITUDE && i == 2)
-		{
-			*d++ = '.';
-			i++;
-		}
-
-		if ((*s >= '0') && (*s <= '9'))
-		{
-			*d++ = *s;
-			i++;
-		}
-	} while (*s++ != '\0');
-
-	// Null terminate.
-	*d = '\0';
-}
-
-
-
-// Prepends s onto d. Assumes d has enough space allocated for the combined string.
-static void Prepend(char* d, const char* s) {
-	assert(s != nullptr && d != nullptr); 
-	
-	size_t len = strlen(s);
-
-	memmove(d + len, d, strlen(d) + 1);
-	memcpy(d, s, len);
-}
-
-
-/*
-// Parse GPS string into tokens
-static size_t ParseRMC(char* sentence, char* tokens[]) {
-	assert(sentence != nullptr);
-
-	size_t n = 0;
-
-	tokens[n] = strtok_(sentence, ",");
-	while (tokens[n] && n < RMC_CHECKSUM)
-		tokens[++n] = strtok_(NULL, ",*");
-
-	return n;
-}*/
-
-
-
-template<typename T>
-static T htoi(const char* hexStr) {
-	T value = T{ 0 };
-
-	if (hexStr != nullptr)
-		for (size_t i = 0; i < sizeof(T) * 2; ++i)
-			value |= hex(tolower(hexStr[i])) << (8 * sizeof(T) - 4 * (i + 1));
-
-	return value;
-};
-
-
-
-// Verify the checksum of the RMC string
-static bool Checksum(char* sentence)
-{
-	assert(sentence != nullptr);
-
-	uint8_t crc = 0;
-	uint8_t n = htoi<uint8_t>(&sentence[strlen(sentence) - 2]);
-
-	// Skip initial '$' and '*' + last 2 bytes (crc).
-	for (size_t i = 1; i < strlen(sentence) - 3; i++)
-		crc ^= sentence[i];
-
-	return (crc == n);
-}
-
-
-
-// Convert float seconds to MM::SS.SS format.
-static void DisplayTime(const uint8_t n, const float ft) {
-	assert(ft > 0.);
-
-	char s1[16];
-
-	memset(&s1[10], 0, 6);
-	uint16_t m = (uint16_t)ft / 60;
-	float fs = ft - (m * 60);
-	sprintf(s1, "%.02d:%05.2f ", m, fs);
-
-	if (n) { // Prepend lap number.
-		char s2[6];
-		sprintf(s2, "%d: ", n);
-		Prepend(s1, s2);
-	}
-
-	std::cout << s1;
-}
 
 
 /***************************************************** TODO **********************************************************************/
@@ -731,6 +506,8 @@ IDs at once or do I have to call that function separately for each can frame i w
 
 /* Does the gps give all of its sentences the same timestamp? I want to know if all 4 of the CANBUS frames ill be sending to the TX2 in
 one iteration of the while loop in the teensy code will all have the same timestamp. */
+
+// GPS can lose fix at any time. Make sure that fact doesnt cause bugs in the code
 
 
 /******************************************************* Unused code *************************************************************
@@ -900,4 +677,213 @@ static bool readCanbusGPSData(CANController &can, CANData* canbusFrame) {
 	canbusFrame->data[6] = canData->data[6];
 	return true;
 }
-*/
+
+
+/*
+/*************************************************** GPS Utility Functions *********************************************
+static void DisplayTime(const uint8_t, const float);
+
+// A very basic atof function (no exponentials, no sign).
+static float atof_(char s[]) {
+	float val, power;
+	int8_t i = 0;
+
+	while (!isdigit(s[i]))
+		i++;
+
+	for (val = 0.0f; isdigit(s[i]); i++)
+		val = 10.0f * val + (s[i] - '0');
+
+	if (s[i] == '.')
+		i++;
+
+	for (power = 1.0f; isdigit(s[i]); i++)
+	{
+		val = 10.0f * val + (s[i] - '0');
+		power *= 10.0f;
+	}
+
+	return val / power;
+}
+
+
+
+// strtok implementation which recognizes consecutive delimiters.
+static char* strtok_(char* str, const char* delim) {
+	static char* staticStr = 0;          // Stores last address.
+	int i = 0, strLen = 0, delimLen = 0; // Indexes.
+
+	// If delimiter is NULL or no more chars remaining.
+	if (delim == 0 || (str == 0 && staticStr == 0))
+		return 0;
+
+	if (str == 0)
+		str = staticStr;
+
+	// Get length of string and delimiter.
+	while (str[strLen])
+		strLen++;
+	while (delim[delimLen])
+		delimLen++;
+
+	// Find a delimiter.
+	char* p = strpbrk(str, delim);
+	if (p)
+		i = p - str;
+	else
+	{
+		// If no delimiters, return str.
+		staticStr = 0;
+		return str;
+	}
+
+	// Terminate the string.
+	str[i] = '\0';
+
+	// Save remaining string.
+	if ((str + i + 1) != 0)
+		staticStr = (str + i + 1);
+	else
+		staticStr = 0;
+
+	return str;
+}
+
+
+
+// Convert hex string to decimal.
+static char hex(const char ch) {
+	if (ch >= '0' && ch <= '9')
+		return ch - '0';
+	if (ch >= 'a' && ch <= 'f')
+		return ch - 'a' + 10;
+
+	return 0;
+}
+
+
+
+static float ConvertToSeconds(char* time) {
+	if (time == nullptr)
+		return 0.0f;
+
+	float timeHours = atof_(time);
+	
+	uint16_t hm = (uint16_t)(timeHours / 100);
+	uint16_t hours = (uint16_t)(ft / 10000);
+	uint16_t minutes = (hm - (hours * 100) + (hours * 60));
+	float seconds = ft - (hm * 100) + (minutes * 60);
+
+	return seconds;
+}
+
+
+// Copy lat/long strings and format as ddd.dddd
+static void GeoCopy(const char* s, char* d, const unsigned char value) {
+	assert(s != nullptr && d != nullptr);
+
+	int i = 0;
+
+	// Copy all numerals, insert/skip decimal point.
+	do {
+		if (value == LONGITUDE && i == 3)
+		{
+			*d++ = '.';
+			i++;
+		}
+
+		if (value == LATITUDE && i == 2)
+		{
+			*d++ = '.';
+			i++;
+		}
+
+		if ((*s >= '0') && (*s <= '9'))
+		{
+			*d++ = *s;
+			i++;
+		}
+	} while (*s++ != '\0');
+
+	// Null terminate.
+	*d = '\0';
+}
+
+
+
+// Prepends s onto d. Assumes d has enough space allocated for the combined string.
+static void Prepend(char* d, const char* s) {
+	assert(s != nullptr && d != nullptr); 
+	
+	size_t len = strlen(s);
+
+	memmove(d + len, d, strlen(d) + 1);
+	memcpy(d, s, len);
+}
+
+
+
+// Parse GPS string into tokens
+static size_t ParseRMC(char* sentence, char* tokens[]) {
+	assert(sentence != nullptr);
+
+	size_t n = 0;
+
+	tokens[n] = strtok_(sentence, ",");
+	while (tokens[n] && n < RMC_CHECKSUM)
+		tokens[++n] = strtok_(NULL, ",*");
+
+	return n;
+}
+
+
+
+template<typename T>
+static T htoi(const char* hexStr) {
+	T value = T{ 0 };
+
+	if (hexStr != nullptr)
+		for (size_t i = 0; i < sizeof(T) * 2; ++i)
+			value |= hex(tolower(hexStr[i])) << (8 * sizeof(T) - 4 * (i + 1));
+
+	return value;
+};
+
+
+
+// Verify the checksum of the RMC string
+static bool Checksum(char* sentence)
+{
+	assert(sentence != nullptr);
+
+	uint8_t crc = 0;
+	uint8_t n = htoi<uint8_t>(&sentence[strlen(sentence) - 2]);
+
+	// Skip initial '$' and '*' + last 2 bytes (crc).
+	for (size_t i = 1; i < strlen(sentence) - 3; i++)
+		crc ^= sentence[i];
+
+	return (crc == n);
+}
+
+
+
+// Convert float seconds to MM::SS.SS format.
+static void DisplayTime(const uint8_t n, const float ft) {
+	assert(ft > 0.);
+
+	char s1[16];
+
+	memset(&s1[10], 0, 6);
+	uint16_t m = (uint16_t)ft / 60;
+	float fs = ft - (m * 60);
+	sprintf(s1, "%.02d:%05.2f ", m, fs);
+
+	if (n) { // Prepend lap number.
+		char s2[6];
+		sprintf(s2, "%d: ", n);
+		Prepend(s1, s2);
+	}
+
+	std::cout << s1;
+}*/
