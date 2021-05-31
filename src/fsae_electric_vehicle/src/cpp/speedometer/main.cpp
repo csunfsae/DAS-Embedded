@@ -5,6 +5,7 @@
 
 #include "ros/ros.h"
 #include "fsae_electric_vehicle/speedometer.h"
+#include <CANController.h>
 int main(int argc, char **argv) {
     ros::init(argc, argv, "SPEEDOMETER");
 

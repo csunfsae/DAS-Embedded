@@ -1,6 +1,6 @@
 #include "ros/ros.h"
 #include <fsae_electric_vehicle/coolant.h>
-#include "CANController.h"
+#include <CANController.h>
 
 int main(int argc, char **argv) {
   ros::init(argc, argv, "Coolant");
