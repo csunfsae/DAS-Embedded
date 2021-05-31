@@ -1,7 +1,6 @@
 /********************************************************************************************************************
  * This is the networking code that sends the vehicle data to the server using SocketIO
  *******************************************************************************************************************/
-
 #include "ros/ros.h"
 #include <ros/callback_queue.h>
 #include "fsae_electric_vehicle/serial.h"
@@ -13,17 +12,23 @@
 #include "fsae_electric_vehicle/gps.h"
 //#include "/home/nvidia/Desktop/formulaEmbedded/src/fsae_electric_vehicle/socket.io-client-cpp/src/sio_client.h" //Change to directory where the header file is at or it won't compile. Seth & Faizan you can add your include that is specific to your computers directory, just make sure all of the other includes for sio_client.h are commented out.
 #include <sio_client.h>
+#include <json.hpp>
 //#include "/home/btc54/Desktop/formulaEmbedded/src/fsae_electric_vehicle/socket.io-client-cpp/src/sio_client.h" 
 #include <string>
 #include <mutex>
+#include <fstream>
 //#include <socket.io-client-cpp/src/sio_client.h>
 //#include "fsae_electric_vehicle/sio_client.h"
+
+  using namespace nlohmann;
 
   float speedVal, driveTrain, coolantTemp, brakePressure;
   
   float suspFrontLeft, suspFrontRight, suspRearLeft, suspRearRight;
   
   float gpsHours, gpsMinutes, gpsSeconds, gpsFix, gpsLat, gpsLon, gpsSpeed, gpsHeading;
+  
+  json carLocation;
   
   std::mutex dataMutex;
 
@@ -35,9 +40,9 @@
   void gpsCallback(const fsae_electric_vehicle::gps::ConstPtr& msg) {
 	std::lock_guard<std::mutex> lock{dataMutex};
 	memcpy(&gpsHours, &msg->hours, sizeof(speedVal)+1);
-  memcpy(&gpsMinutes, &msg->minutes, sizeof(speedVal)+1);
-  memcpy(&gpsSeconds, &msg->seconds, sizeof(speedVal)+1);
-  memcpy(&gpsFix, &msg->fix, sizeof(speedVal)+1);
+  	memcpy(&gpsMinutes, &msg->minutes, sizeof(speedVal)+1);
+  	memcpy(&gpsSeconds, &msg->seconds, sizeof(speedVal)+1);
+  	memcpy(&gpsFix, &msg->fix, sizeof(speedVal)+1);
 	//memcpy(&gpsLat, &msg->latitude, sizeof(speedVal)+1);
 	//memcpy(&gpsLon, &msg->longitude, sizeof(speedVal)+1);
 	memcpy(&gpsSpeed, &msg->speed, sizeof(speedVal)+1);
@@ -59,13 +64,43 @@
  	memcpy(&driveTrain, &msg->voltage, sizeof(speedVal)+1);
  }
  
-  void suspensionCallback(const fsae_electric_vehicle::suspension::ConstPtr& msg) {
+ void suspensionCallback(const fsae_electric_vehicle::suspension::ConstPtr& msg) {
 	std::lock_guard<std::mutex> lock{dataMutex};
  	memcpy(&suspFrontLeft, &msg->frontLeft, sizeof(speedVal)+1);
  	memcpy(&suspFrontRight, &msg->frontRight, sizeof(speedVal)+1);
  	memcpy(&suspRearLeft, &msg->rearLeft, sizeof(speedVal)+1);
  	memcpy(&suspRearRight, &msg->rearRight, sizeof(speedVal)+1);
  }
+ 
+sio::message::ptr createObject(json o)
+{
+    sio::message::ptr object = sio::object_message::create();
+
+    for (json::iterator it = o.begin(); it != o.end(); ++it)
+    {
+        auto key = it.key();
+        auto v = it.value();
+
+        if (v.is_boolean())
+        {
+            object->get_map()[key] = sio::bool_message::create(v.get<bool>());
+        }
+        else if (v.is_number_float())
+        {
+            object->get_map()[key] = sio::double_message::create(v.get<double>());
+        }
+        else if (v.is_string())
+        {
+            object->get_map()[key] = sio::string_message::create(v.get<std::string>());
+        }
+        else if (v.is_object())
+        {
+            json childObject = v;
+            object->get_map()[key] = createObject(childObject);
+        }
+    }
+    return object;
+}
 
 int main(int argc, char **argv) {
 
@@ -95,6 +130,13 @@ int main(int argc, char **argv) {
 
   while (ros::ok()) {
     ros::spinOnce();
+    
+    carLocation["latitude"] = 314.11;
+    carLocation["longitude"] = 1115.321;
+    
+    //std::ifstream ifs("carLocation.json");
+    //json parseLocation = json::parse(ifs);
+
 
     h.socket()->emit("speedometer", sio::double_message::create(speedVal));
     h.socket()->emit("driveTrain", sio::double_message::create(brakePressure));
@@ -110,11 +152,13 @@ int main(int argc, char **argv) {
     h.socket()->emit("gpsMinutes", sio::double_message::create(gpsMinutes));
     h.socket()->emit("gpsSeconds", sio::double_message::create(gpsSeconds));
     h.socket()->emit("gpsFix", sio::double_message::create(gpsFix));
-    //h.socket()->emit("gpsLat", sio::double_message::create(gpsLat));
-    //h.socket()->emit("gpsLon", sio::double_message::create(gpsLon));
+    h.socket()->emit("gpsLat", sio::double_message::create(gpsLat));
+    h.socket()->emit("gpsLon", sio::double_message::create(gpsLon));
     h.socket()->emit("gpsSpeed", sio::double_message::create(gpsSpeed));
     h.socket()->emit("gpsHeading", sio::double_message::create(gpsHeading));
     
+    sio::message::ptr object = createObject(carLocation);
+    h.socket()->emit("carLocation", object);
     
     loop_rate.sleep();
   }

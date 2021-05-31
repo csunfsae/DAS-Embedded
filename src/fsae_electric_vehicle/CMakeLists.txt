@@ -4,6 +4,7 @@ project(fsae_electric_vehicle)
 
 ## Compile as C++11, supported in ROS Kinetic and newer
 ## add_compile_options(-std=c++11)
+set(CMAKE_CXX_STANDARD 17)
 
 ## Find catkin macros and libraries
 ## if COMPONENTS list like find_package(catkin REQUIRED COMPONENTS xyz)
@@ -35,58 +36,67 @@ generate_messages(DEPENDENCIES std_msgs)
 
 catkin_package(
 	INCLUDE_DIRS socket.io-client-cpp
+	INCLUDE_DIRS json-develop
+	INCLUDE_DIRS CANController
 	CATKIN_DEPENDS message_runtime)
 
 include_directories(
   socket.io-client-cpp
+  json-develop
+  json-develop/include/nlohmann
+  json-develop/include
+  CANController
   ${catkin_INCLUDE_DIRS}
   ${Boost_INCLUDE_DIRS}
 )
 
-add_library(${PROJECT_NAME} socket.io-client-cpp/src/sio_client.cpp socket.io-client-cpp/src/sio_socket.cpp socket.io-client-cpp/src/internal/sio_client_impl.cpp socket.io-client-cpp/src/internal/sio_packet.cpp)
+add_library(${PROJECT_NAME} socket.io-client-cpp/src/sio_client.cpp socket.io-client-cpp/src/sio_socket.cpp socket.io-client-cpp/src/internal/sio_client_impl.cpp socket.io-client-cpp/src/internal/sio_packet.cpp json-develop/include/nlohmann CANController/CANController.cpp)
 
 target_include_directories(${PROJECT_NAME} PUBLIC 
     socket.io-client-cpp/src 
     socket.io-client-cpp/lib/websocketpp 
     socket.io-client-cpp/lib/rapidjson/include
+    json-develop/include/nlohmann
+    CANController
 )
 
 
 
-add_executable(DriveTrain src/cpp/drivetrain/drive_train.cpp src/cpp/drivetrain/CANController.cpp)
+add_executable(DriveTrain src/cpp/drivetrain/drive_train.cpp CANController/CANController.cpp)
 target_link_libraries(DriveTrain ${catkin_LIBRARIES})
 target_compile_features(DriveTrain PUBLIC cxx_std_17)
 add_dependencies(DriveTrain fsae_electric_vehicle_generate_messages_cpp)
 
-add_executable(CoolantTemp src/cpp/Coolant_temp/main.cpp  src/cpp/Coolant_temp/CANController.cpp)
+add_executable(CoolantTemp src/cpp/Coolant_temp/main.cpp  CANController/CANController.cpp)
 target_link_libraries(CoolantTemp ${catkin_LIBRARIES})
 target_compile_features(CoolantTemp PUBLIC cxx_std_17)
 add_dependencies(CoolantTemp fsae_electric_vehicle_generate_messages_cpp)
 
-add_executable(Brakes src/cpp/brakes/brake_pressure.cpp src/cpp/brakes/CANController.cpp)
+add_executable(Brakes src/cpp/brakes/brake_pressure.cpp CANController/CANController.cpp)
 target_link_libraries(Brakes ${catkin_LIBRARIES})
 target_compile_features(Brakes PUBLIC cxx_std_17)
 add_dependencies(Brakes fsae_electric_vehicle_generate_messages_cpp)
 
 add_executable(SocketIOSender src/cpp/SocketIOSender/main.cpp)
-target_link_libraries(SocketIOSender ${catkin_LIBRARIES} ${PROJECT_NAME} )
+target_link_libraries(SocketIOSender ${catkin_LIBRARIES} ${PROJECT_NAME})
 target_compile_features(SocketIOSender PUBLIC cxx_std_17)
 add_dependencies(SocketIOSender fsae_electric_vehicle_generate_messages_cpp)
 
-add_executable(SPEEDOMETER src/cpp/speedometer/main.cpp src/cpp/speedometer/CANController.cpp)
+add_executable(SPEEDOMETER src/cpp/speedometer/main.cpp CANController/CANController.cpp)
 target_link_libraries(SPEEDOMETER ${catkin_LIBRARIES})
 target_compile_features(SPEEDOMETER PUBLIC cxx_std_17)
 add_dependencies(SPEEDOMETER fsae_electric_vehicle_generate_messages_cpp)
 
-add_executable(Suspension src/cpp/suspension/main.cpp src/cpp/suspension/CANController.cpp)
+add_executable(Suspension src/cpp/suspension/main.cpp CANController/CANController.cpp)
 target_link_libraries(Suspension ${catkin_LIBRARIES})
 target_compile_features(Suspension PUBLIC cxx_std_17)
 add_dependencies(Suspension fsae_electric_vehicle_generate_messages_cpp)
 
-add_executable(gps_lap_timer src/cpp/gps_lap_timer/gps_lap_timer.cpp src/cpp/gps_lap_timer/GPSUtilities.cpp src/cpp/gps_lap_timer/CANController.cpp)
+add_executable(gps_lap_timer src/cpp/gps_lap_timer/gps_lap_timer.cpp src/cpp/gps_lap_timer/GPSUtilities.cpp CANController/CANController.cpp)
 target_link_libraries(gps_lap_timer ${catkin_LIBRARIES})
 target_compile_features(gps_lap_timer PUBLIC cxx_std_17)
 add_dependencies(gps_lap_timer fsae_electric_vehicle_generate_messages_cpp)
+
 
 ########################## These are old python files ############################
 #
