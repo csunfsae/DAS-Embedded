@@ -20,6 +20,7 @@
  * and are displayed with the data mixed together.
  * Example: ,$4G8P,G1S6V0,,33,03,,1152,,4143,,12043,,03618,,2461,,2186,,22803,,34120,,1204,,2065,,21287,,04415*,7253,
  *  
+ *  Sometimes when the GPS units start up, they output all gps sentences, not just GPRMC
  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!*/
 
 // TEENSY SENDS GPS DATA TO SERVER. LAT & LON ARE NOT CORRECT. 
@@ -47,6 +48,10 @@ FlexCAN_T4<CAN1, RX_SIZE_256, TX_SIZE_16> canbus; /* CAN2 is Teensy4.1 pins 0 & 
 Adafruit_GPS GPS(&GPSSerial2);        // Connect to the GPS units on separate hardware serial ports
 //Adafruit_GPS GPS2(&GPSSerial1);
 
+#define PGCMD_ANTENNA "$PGCMD,33,1*6C" // request for updates on antenna status
+#define PGCMD_NOANTENNA "$PGCMD,33,0*6D"
+//GPS.sendCommand(PGCMD_ANTENNA); // ON
+
 
 
 // -------------------------------------------------------------------------------------------------------------------
@@ -73,7 +78,7 @@ void setup(void)
                            print it out we don't suggest using anything higher than 1 Hz */
 
   // Request updates on antenna status, comment out to keep quiet
-  GPS.sendCommand(PGCMD_ANTENNA);
+  //GPS.sendCommand(PGCMD_ANTENNA);
 }
 
 
@@ -97,8 +102,11 @@ void loop(void)
 
   // Print out raw GPS data to audino serial console for each GPS separately
   char c = GPS.read();
-  if ((c) && (GPSECHO)) {
-    Serial.write(c);
+  if (c == '$')
+    Serial.write("\n");
+  while ((c) && (GPSECHO)) {
+    Serial.write(c);  // Writes one char, not entire string
+    c = GPS.read();   // Reads one char, not entire string
   }
 
   // A tricky thing here is if we print the NMEA sentence, or data
@@ -107,14 +115,11 @@ void loop(void)
   //
   // If a sentence is received, we can check the checksum, parse it...
   if (GPS.newNMEAreceived()) {
-  Serial.println("NMEA has been received on GPS1!");
-  if (!GPS.parse(GPS.lastNMEA())) // This also sets the newNMEAreceived() flag to false
-    return;           // We can fail to parse a sentence in which case we should just wait for another
-  }
+    Serial.println("NMEA has been received on GPS1!");
+    if (!GPS.parse(GPS.lastNMEA())) {}  // This also sets the newNMEAreceived() flag to false
+      //return;                         // We can fail to parse a sentence in which case we should just wait for another
 
-  // Print the info received from GPS and then send CANBUS packets with a max # of times per second
-  if (millis() - gpsTimer > 2000) {
-    gpsTimer = millis();          // Reset the timer
+    gpsTimer = millis();              // Reset the timer
     Serial.print("GPS Timer (ms): ");
     Serial.print(gpsTimer);
     int gpsNum = 1;
@@ -142,6 +147,11 @@ void loop(void)
     it is in the middle of writting that information to a canbus packet. Or maybe the funciton that
     gives me date and time already does that for me.
     */
+  }
+
+  // Print the info received from GPS and then send CANBUS packets with a max # of times per second
+  if (millis() - gpsTimer > 2000) {
+
   }
   
   /*//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -187,6 +197,7 @@ void loop(void)
 void fillCanbusFrameOne(Adafruit_GPS GPS, int gpsNum, uint32_t gpsTimer) {
   canMsg.flags.extended = 0;
   canMsg.flags.remote = 0;
+  canMsg.timestamp = gpsTimer;
   
   if (gpsNum == 1)
     canMsg.id = 0x35;        // The gps_lap_timer.cpp code is looking for these hex values

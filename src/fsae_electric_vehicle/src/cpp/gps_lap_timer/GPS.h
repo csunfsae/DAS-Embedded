@@ -14,7 +14,7 @@
 #define D_TO_RADIANS                  (PI/180.0f)
 
 // GPS RMC sentence fields.
-#define GPS_HOUR				0
+#define GPS_HOURS				0
 #define GPS_MINUTES				1
 #define GPS_SECONDS				2
 #define GPS_FIX      			3
@@ -33,12 +33,13 @@
 struct point_t { float x, y; };
 struct line_t { point_t p0, p1; };
 
+static void waitForGPSFix(CANController*);
 static void FillRosMessageWithFrameTwoData(fsae_electric_vehicle::gps*, std::optional<CANData>);
 static void FillRosMessageWithFrameOneData(fsae_electric_vehicle::gps*, std::optional<CANData>);
-static void GetGPSData(CANController* can,
-						std::pair<std::optional<CANData>, std::optional<CANData>> gpsUnitOneData,
-						std::pair<std::optional<CANData>, std::optional<CANData>> gpsUnitTwoData);
-static float EstablishStartLine(const std::pair<std::optional<CANData>, std::optional<CANData>>);
+static bool GetGPSData(CANController* can,
+						std::pair<std::optional<CANData>, std::optional<CANData>>* gpsUnitOneData,
+						std::pair<std::optional<CANData>, std::optional<CANData>>* gpsUnitTwoData);
+static void EstablishStartLine(const std::pair<std::optional<CANData>, std::optional<CANData>>);
 static void Run(float, char *[]);
 static float Distance(const point_t, const point_t);
 static void IntersectPoint(const point_t, const point_t, point_t*);
