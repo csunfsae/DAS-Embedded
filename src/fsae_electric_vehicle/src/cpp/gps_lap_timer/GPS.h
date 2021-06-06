@@ -33,12 +33,16 @@
 struct point_t { float x, y; };
 struct line_t { point_t p0, p1; };
 
-static void waitForGPSFix(CANController*);
+enum validFrame {noFrames = 0, unitOneFrameOne, unitOneFrameOneAndTwo, unitTwoFrameOne, unitTwoFrameOneAndTwo};
+
+static void waitForGPSFix(CANController*,
+						std::pair<std::optional<CANData>, std::optional<CANData>>*,
+						std::pair<std::optional<CANData>, std::optional<CANData>>*);
 static void FillRosMessageWithFrameTwoData(fsae_electric_vehicle::gps*, std::optional<CANData>);
 static void FillRosMessageWithFrameOneData(fsae_electric_vehicle::gps*, std::optional<CANData>);
-static bool GetGPSData(CANController* can,
-						std::pair<std::optional<CANData>, std::optional<CANData>>* gpsUnitOneData,
-						std::pair<std::optional<CANData>, std::optional<CANData>>* gpsUnitTwoData);
+static validFrame GetGPSData(CANController*,
+						std::pair<std::optional<CANData>, std::optional<CANData>>*,
+						std::pair<std::optional<CANData>, std::optional<CANData>>*);
 static void EstablishStartLine(const std::pair<std::optional<CANData>, std::optional<CANData>>);
 static void Run(float, char *[]);
 static float Distance(const point_t, const point_t);
@@ -58,7 +62,6 @@ static void Prepend(char*, const char*);
 static size_t ParseRMC(char*, char* []);
 static bool Checksum(char*);
 static void DisplayTime(const uint8_t, const float);
-
 
 
 
@@ -132,25 +135,6 @@ private:
 	float stop;
 };
 
-
-
-// Error descriptions.
-static const char* description[] = { "NO ERROR",  "CHECKSUM FAILURE", "INVALID SENTENCE", "NO FIX", "NON-SEQUENTIAL SENTENCE", "END OF FILE" };
-
-// Simplistic error tracker.
-struct err
-{
-public:
-	enum ID : size_t { NONE = 0, CHECKSUM, BAD_SENTENCE, NO_FIX, TIME_STAMP, FILE_EOF };
-
-	void Clear() { error_ = ID::NONE; }
-	void SetError(const ID id) { error_ = id; }
-	ID GetError() const { return error_; }
-	const char* GetDescription() const { return description[error_]; }
-
-private:
-	ID error_;
-};
 
 // File is used for testing. It replaces the data coming from the CANBUS
 //#define FILE_INPUT

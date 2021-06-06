@@ -1,18 +1,19 @@
 /******************************************************************************************************************************************
  *  This code only works in the PST time zone
+ * Im not using the "valid" field within the CANBUS frame
  * 
- * This code's goal is to read the CANBUS frames sent from the Adafruit GPS units and use it to calculate the number of laps, lap times,
+ * This programs goal is to read the CANBUS frames sent from the Adafruit GPS units and use it to calculate the number of laps, lap times,
  * & best lap time. That requires this program to know the cars ground location, the ground location of the start/finish line. This program
  * will know when the car has crossed the start/finish line by drawing a line between its current GPS position and its previous GPS
  * location and then checking to see if that line intersects with the start/finish line.
+ * getData() runs in less than 0.00006 seconds
+ * 
  * 
  * 
  * 
  * What Ive done since last commit:
- * getData() runs in less than 0.00006 seconds
- * Deleted LabView simulation files
- * Pair one is filled with can data
- * Added some error checking/logging
+ * Added validFrames Enum to make frames as valid or not. Not using the valid indicator in the frame itself
+ * Added code to change the ROS log level
 *******************************************************************************************************************************************/
 
 /* TIMING CODE
@@ -46,13 +47,12 @@ line_t startLine;		// startLine defined by two points
 uint16_t startHeading;	// Heading crossing start/finish.
 line_t carCoordinates;	// Coordinates of current & previous GPS location.
 
-err error;	// GPS errors
-
 
 
 int main(int argc, char **argv)
 {
-	ROS_INFO("In gps_lap_timer main function\n");
+	std::cout << "In cout gps_lap_timer main function\n" << std::endl;
+	ROS_INFO_STREAM("In gps_lap_timer main function\n");
 
 	// Stuff to make this a ROS node
 	ros::init(argc, argv, "gps_lap_timer");
@@ -75,22 +75,31 @@ int main(int argc, char **argv)
 	std::pair<std::optional<CANData>, std::optional<CANData>> gpsUnitOneData; 
 	std::pair<std::optional<CANData>, std::optional<CANData>> gpsUnitTwoData;
 
-	waitForGPSFix(&can);
+	if (ros::console::set_logger_level(ROSCONSOLE_DEFAULT_NAME, ros::console::levels::Debug)) {
+		ros::console::notifyLoggerLevelsChanged();
+	}
+
+	waitForGPSFix(&can, &gpsUnitOneData, &gpsUnitTwoData);
 
 	// If button is pressed to make start line. This is set to true because there is no button to make the startline yet
 	if (true) {
 		// Fill up one GPSUpdateCycle struct with data from one gps cycle. Not data split from 2 cycles of the GPS while loop on Teensy
 		// While either pair is not full
 		ROS_INFO("Establishing the Start Line");
-		while (GetGPSData(&can, &gpsUnitOneData, &gpsUnitTwoData) == false){
-			// Old While Condition !(gpsUnitOneData.first.has_value() && gpsUnitOneData.second.has_value()) || !(gpsUnitTwoData.first.has_value() && gpsUnitTwoData.second.has_value())
-			std::this_thread::sleep_for(std::chrono::milliseconds(10));
-			ROS_WARN_DELAYED_THROTTLE(15, "Trying to read two CANBUS packets with GPS data... Taking longer than expected.");
-			continue;
-		}
-		//std::cout << "At least one pair is full" << std::endl;
 
-		/*// Print out frame
+		validFrame updatedFrames = noFrames;
+		do {
+			updatedFrames = GetGPSData(&can, &gpsUnitOneData, &gpsUnitTwoData);
+
+			ROS_WARN_DELAYED_THROTTLE(15, "Trying to read two CANBUS packets with GPS data... Taking longer than expected.");
+
+			std::this_thread::sleep_for(std::chrono::milliseconds(10));
+		} while (updatedFrames != unitOneFrameOneAndTwo && updatedFrames != unitTwoFrameOneAndTwo);
+		//!(updatedFrames != unitOneFrameOneAndTwo) || !(updatedFrames == unitTwoFrameOneAndTwo)
+
+		ROS_INFO("At least one pair is full");
+
+		// Print out frame
 		std::cout << "UnitOneData:" << std::endl;
 		std::cout << "VALID:" << gpsUnitOneData.first->valid << std::endl;
 		printf("Hours: %u \n", gpsUnitOneData.first->data[GPS_HOURS]);
@@ -98,43 +107,66 @@ int main(int argc, char **argv)
 		printf("Secs: %u \n", gpsUnitOneData.first->data[GPS_SECONDS]);
 		printf("FIX: %u \n", gpsUnitOneData.first->data[GPS_FIX]);
 		printf("Speed: %u \n", gpsUnitOneData.first->data[GPS_SPEED]);
-		*/
 
 		// Establish startline using just one of the pairs
-		if (gpsUnitOneData.first.has_value() && gpsUnitOneData.second.has_value()) {
+		if (updatedFrames == unitOneFrameOneAndTwo) {
 			//std::cout << "In If" << std::endl;
 			EstablishStartLine(gpsUnitOneData);
 		}
-		else if (gpsUnitTwoData.first.has_value() && gpsUnitTwoData.second.has_value()) {
+		else if (updatedFrames = unitTwoFrameOneAndTwo) {
 			//std::cout << "In If 2" << std::endl;
 			EstablishStartLine(gpsUnitTwoData);
 		}
 		else
-			ROS_ERROR("Cannot Establish a Start Line due to at least 1 of 2 CANBUS frames missing!");
+			ROS_ERROR("Cannot Establish a Start Line due to at least 1 out of 2 CANBUS frames missing!");
 
 		//std::cout << "AFTER If" << std::endl;
 	}
 
 	ros::Rate loop_rate(40); // This means that loop rate can be up to 30 times per second
   	
+	validFrame updatedFrames = noFrames;
 	while (ros::ok()) {
 		ROS_INFO_ONCE("ROS is ok! Entered the main while loop");
 
 		// Read CANBUS frames from the CANBUS header
-		GetGPSData(&can, &gpsUnitOneData, &gpsUnitTwoData);
+		updatedFrames = GetGPSData(&can, &gpsUnitOneData, &gpsUnitTwoData);
+
+		// Process the GPS data
+		if (updatedFrames != noFrames) {
+			//LapTimer(gpsUnitOneData, gpsUnitTwoData);
+		}
 
 		// Store data in the CANBUS frame depending on which frame is recieved
 		// Its ok if we have the first frame but not the second because we can verify that we still have fix.
 		// Its not ok if we have the 2nd frame and not the first because we cannot verify that we still have fix.
-		if (gpsUnitOneData.first.has_value() && gpsUnitOneData.first->valid && gpsUnitOneData.first->data[GPS_FIX]) {
-			FillRosMessageWithFrameOneData(&gps_lap_timer, gpsUnitOneData.first);
-			if (gpsUnitOneData.second.has_value() && gpsUnitOneData.second->valid)
+		switch (updatedFrames) {
+			case noFrames: // Do nothing
+				break;
+			case unitOneFrameOne:
+				FillRosMessageWithFrameOneData(&gps_lap_timer, gpsUnitOneData.first);
+				break;
+			case unitOneFrameOneAndTwo:
+				FillRosMessageWithFrameOneData(&gps_lap_timer, gpsUnitOneData.first);
 				FillRosMessageWithFrameTwoData(&gps_lap_timer, gpsUnitOneData.second);
-		} else if (gpsUnitTwoData.first.has_value() && gpsUnitTwoData.first->valid && gpsUnitTwoData.first->data[GPS_FIX]) {
-			FillRosMessageWithFrameOneData(&gps_lap_timer, gpsUnitTwoData.first);
-			if (gpsUnitTwoData.second.has_value() && gpsUnitTwoData.second->valid)
+				break;
+			case unitTwoFrameOne:
+				FillRosMessageWithFrameOneData(&gps_lap_timer, gpsUnitTwoData.first);
+				break;
+			case unitTwoFrameOneAndTwo:
+				FillRosMessageWithFrameOneData(&gps_lap_timer, gpsUnitOneData.first);
 				FillRosMessageWithFrameTwoData(&gps_lap_timer, gpsUnitTwoData.second);
+				break;
 		}
+
+		/* Other stuff to send to sioSender.cpp
+		start line
+		lap #
+		current lap time
+		best lap time & its corresponding lap
+		ending lap time
+		maybe startHeading
+		*/
 
 		// Send ROS message filled with GPS data to sioSender.cpp
 		gps_lap_timer_pub.publish(gps_lap_timer);
@@ -147,7 +179,10 @@ int main(int argc, char **argv)
 
 
 // Doesnt return until a GPS fix is found
-static void waitForGPSFix(CANController* can) {
+static void waitForGPSFix(CANController* can,
+						std::pair<std::optional<CANData>, std::optional<CANData>>* gpsUnitOneData,
+						std::pair<std::optional<CANData>, std::optional<CANData>>* gpsUnitTwoData)
+	{
 	do {
 		std::optional<CANData> canData = can->getData(GPS_ONE_FRAME_ONE_ID, 0x1FFFFFFF); // 2nd param is ID mask
 		if (canData.has_value() && canData->data[GPS_FIX] == 1)
@@ -158,10 +193,13 @@ static void waitForGPSFix(CANController* can) {
 			break; // No need to copy frames into gpsUnitTwoData
 
 		ROS_INFO_THROTTLE(2, "Waiting for GPS fix!\n");
-		ROS_WARN_THROTTLE(120, "Taking a long time to find a GPS fix.");
+		ROS_WARN_DELAYED_THROTTLE(120, "Taking a long time to find a GPS fix.");
 
 		std::this_thread::sleep_for(std::chrono::milliseconds(500));
 	} while (true);
+
+	gpsUnitOneData->first->valid = 0;
+	gpsUnitTwoData->first->valid = 0;
 
 	ROS_INFO("Found FIX!");
 }
@@ -169,15 +207,16 @@ static void waitForGPSFix(CANController* can) {
 
 
 // Read CANBUS frames from the CANBUS header and store them in the gpsUnitOneData or gpsUnitTwoData pairs. Return turn true means a pair is full
-static bool GetGPSData(CANController* can,
+static validFrame GetGPSData(CANController* can,
 						std::pair<std::optional<CANData>, std::optional<CANData>>* gpsUnitOneData,
-						std::pair<std::optional<CANData>, std::optional<CANData>>* gpsUnitTwoData) { //  Need to pass pairs by reference
-
+						std::pair<std::optional<CANData>, std::optional<CANData>>* gpsUnitTwoData)
+	{
 	// Look for frame one (id = 0x35) from GPS unit one
 	std::optional<CANData> canData = can->getData(GPS_ONE_FRAME_ONE_ID, 0x1FFFFFFF);
 	
 	if (canData.has_value() && canData->valid) { 	// If frame has been read
 		gpsUnitOneData->first = canData;			// Store frame in gpsUnitOneData
+		ROS_DEBUG("GPS1 F 1 read");
 
 		canData.reset();							// Clear the data from canData
 
@@ -185,10 +224,13 @@ static bool GetGPSData(CANController* can,
 
 		if (canData.has_value()) {					// If frame has been read
 			gpsUnitOneData->second = canData;		// Store frame in gpsUnitTwoData
-			return true;
+			ROS_DEBUG("GPS1 F 2 read");
+			return unitOneFrameOneAndTwo;
 		}
 
 		ROS_WARN("First CANBUS frame for GPS 1 was read, but not the second frame containing latitude & longitude.");
+
+		return unitOneFrameOne;
 	}
 
 	// Look for frame one (id = 0x37) from GPS unit two
@@ -196,6 +238,7 @@ static bool GetGPSData(CANController* can,
 
 	if (canData.has_value() && canData->valid) {	// If frame has been read
 		gpsUnitTwoData->first = canData2;			// Store frame in gpsUnitTwoData
+		ROS_DEBUG("GPS2 F 1 read");
 
 		canData.reset();							// Clear the data from canData
 
@@ -203,15 +246,16 @@ static bool GetGPSData(CANController* can,
 
 		if (canData.has_value()) {					// If frame has been read
 			gpsUnitTwoData->second = canData2;		// Store frame in gpsUnitTwoData
-			return true;
+			ROS_DEBUG("GPS2 F 2 read");
+			return unitTwoFrameOneAndTwo;
 		}
 
 		ROS_WARN("First CANBUSframe for GPS 1 and GPS 2 were read, but not the second frame for GPS 1 and 2 containing latitude & longitude.");
-	}
-	
-	ROS_WARN("Could not read both CANBUS frames for both GPS 1 & GPS 2!");
 
-	return false;
+		return unitTwoFrameOne;
+	}
+
+	return noFrames;
 }
 
 

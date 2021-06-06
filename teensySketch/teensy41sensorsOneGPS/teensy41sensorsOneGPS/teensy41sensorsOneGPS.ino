@@ -119,7 +119,7 @@ void loop(void)
     if (!GPS.parse(GPS.lastNMEA())) {}  // This also sets the newNMEAreceived() flag to false
       //return;                         // We can fail to parse a sentence in which case we should just wait for another
 
-    gpsTimer = millis();              // Reset the timer
+    gpsTimer = millis();                // Reset the timer
     Serial.print("GPS Timer (ms): ");
     Serial.print(gpsTimer);
     int gpsNum = 1;
@@ -130,7 +130,7 @@ void loop(void)
     // Frame 2 includes Latitude and Longitude
     fillCanbusFrameOne(GPS, gpsNum, gpsTimer);  // Fill CANBUS struct with 1st part of GPS1 data that we want to send
     canbus.read(canMsg);          // CANBUS pin will read the canMsg struct just populated with data  
-    Serial.println("____FRAME ONE___ "); canSniff();                 // Print out CAN frame
+    Serial.println("____FRAME ONE___ "); canSniff();               // Print out CAN frame
     canbus.write(canMsg);         // Send packet over CANBUS
 
 
