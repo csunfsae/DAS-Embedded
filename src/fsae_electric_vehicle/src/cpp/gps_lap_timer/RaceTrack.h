@@ -16,6 +16,7 @@ private:
 	uint16_t	startHeading;		// Current heading when startLine was created
 	line		carCoordinates;		// Coordinates of current & previous GPS location
     int         numOfLaps;
+    float       lapEndTime;
 	std::pair<unsigned int, float> bestLapTime;		// Best lap time (lap #, time)
 
 public:
@@ -27,18 +28,26 @@ public:
         carCoordinates.p0.x = 0, carCoordinates.p0.y = 0, carCoordinates.p1.x = 0, carCoordinates.p1.y = 0;
         numOfLaps = 0;
         bestLapTime.first = 0, bestLapTime.second = 0.0;
+        lapEndTime = 0;
     }
 
     std::string getName() const { return name; }
+
     void setName(){
         this->name = name;
     }
 
 	point getStartPoint() const { return startPoint; }
 
+    line getStartLine() const { return startLine; }
+
 	uint16_t getStartHeading() const { return startHeading; }
 
 	line getCarCoordinates() const { return carCoordinates; }
+
+    int getNumOfLaps() { return numOfLaps; }
+
+    float getLapEndTime() { return lapEndTime; }
 
 	void EstablishStartLine(const std::pair<std::optional<CANData>, std::optional<CANData>> gpsUnitData) {
 		float posTimestamp, latitudeCoordinate, longitudeCoordinate;
@@ -66,9 +75,10 @@ public:
 	}
 
 	// Checks if the start line was crossed, returns bool.
-	void updateCarCoordinates(point carPosition) {
+	void updateCarCoordinates(point newCoordinates) {
 		carCoordinates.p1 = carCoordinates.p0;
-		carCoordinates.p0 = carPosition;
+		carCoordinates.p0.x = newCoordinates.x;
+        carCoordinates.p0.y = newCoordinates.y;
 
 		wasStartLineCrossed();
 	}
@@ -237,6 +247,8 @@ private:
                 //bestLapTime.first = numOfLaps; 
                 //bestLapTime.second = currentLapTime
             }*/
-		}
+		} else {
+            lapEndTime = 0;
+        }
     }
 };

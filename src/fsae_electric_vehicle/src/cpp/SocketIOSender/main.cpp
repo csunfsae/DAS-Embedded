@@ -26,7 +26,7 @@
   
   float suspFrontLeft, suspFrontRight, suspRearLeft, suspRearRight;
   
-  float gpsHours, gpsMinutes, gpsSeconds, gpsFix, gpsLat, gpsLon, gpsSpeed, gpsHeading;
+  float gpsHours, gpsMinutes, gpsSeconds, gpsFix, gpsLat, gpsLon, gpsSpeed, gpsHeading, gpsLapEndTime, gpsCurrentLapTimer;
   
   json carLocation;
   
@@ -39,14 +39,16 @@
   
   void gpsCallback(const fsae_electric_vehicle::gps::ConstPtr& msg) {
 	std::lock_guard<std::mutex> lock{dataMutex};
-	memcpy(&gpsHours, &msg->hours, sizeof(speedVal)+1);
+  	memcpy(&gpsHours, &msg->hours, sizeof(speedVal)+1);
   	memcpy(&gpsMinutes, &msg->minutes, sizeof(speedVal)+1);
   	memcpy(&gpsSeconds, &msg->seconds, sizeof(speedVal)+1);
   	memcpy(&gpsFix, &msg->fix, sizeof(speedVal)+1);
-	//memcpy(&gpsLat, &msg->latitude, sizeof(speedVal)+1);
-	//memcpy(&gpsLon, &msg->longitude, sizeof(speedVal)+1);
-	memcpy(&gpsSpeed, &msg->speed, sizeof(speedVal)+1);
-	memcpy(&gpsHeading, &msg->heading, sizeof(speedVal)+1);
+	  //memcpy(&gpsLat, &msg->latitude, sizeof(speedVal)+1);
+	  //memcpy(&gpsLon, &msg->longitude, sizeof(speedVal)+1);
+	  memcpy(&gpsSpeed, &msg->speed, sizeof(speedVal)+1);
+	  memcpy(&gpsHeading, &msg->heading, sizeof(speedVal)+1);
+    memcpy(&gpsLapEndTime, &msg->lapEndTime, sizeof(speedVal)+1);
+    memcpy(&gpsCurrentLapTimer, &msg->currentLapTimer, sizeof(speedVal)+1);
  }
 
  void brakeCallback(const fsae_electric_vehicle::brake_pressure::ConstPtr& msg) {
@@ -126,8 +128,6 @@ int main(int argc, char **argv) {
   
   ros::Rate loop_rate{30};
 
-
-
   while (ros::ok()) {
     ros::spinOnce();
     
@@ -152,11 +152,13 @@ int main(int argc, char **argv) {
     h.socket()->emit("gpsMinutes", sio::double_message::create(gpsMinutes));
     h.socket()->emit("gpsSeconds", sio::double_message::create(gpsSeconds));
     h.socket()->emit("gpsFix", sio::double_message::create(gpsFix));
-    h.socket()->emit("gpsLat", sio::double_message::create(gpsLat));
-    h.socket()->emit("gpsLon", sio::double_message::create(gpsLon));
+    //h.socket()->emit("gpsLat", sio::double_message::create(gpsLat));
+    //h.socket()->emit("gpsLon", sio::double_message::create(gpsLon));
     h.socket()->emit("gpsSpeed", sio::double_message::create(gpsSpeed));
     h.socket()->emit("gpsHeading", sio::double_message::create(gpsHeading));
-    
+    h.socket()->emit("gpsEndLapTime", sio::double_message::create(gpsLapEndTime));
+    h.socket()->emit("gpsCurrentLapTimer", sio::double_message::create(gpsCurrentLapTimer));
+
     sio::message::ptr object = createObject(carLocation);
     h.socket()->emit("carLocation", object);
     

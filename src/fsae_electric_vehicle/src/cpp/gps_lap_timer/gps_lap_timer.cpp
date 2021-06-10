@@ -9,16 +9,14 @@
  * getData() runs in less than 0.00006 seconds
  * 
  * I was finguring out how im going to track lap times.
- * I was on line 152. Trying to figure out how to updated the carCoordinates of the RaceTrack object
+ * I was on line 152. Trying to figure out how to update the carCoordinates of the RaceTrack object
  * 
  * Establish the startLine when the car is driving over 20mph for 5 seconds. That way no physical button is needed for the driver to push.
  * Can the private functions in RaceTrack object be defined as const? LineIntersect() const {}
  * 
  * What Ive done since last commit:
- * Added the RaceTrack object.
- * Separated classes into different .h files
- * I am making the RaceTrack object auto update its attributes when given new carCoordinates
- * Started to track lap and lap times.
+ * Sends lapEndTime & currentLapTime to the server, and almost startLine too.
+ * 
 *******************************************************************************************************************************************/
 
 /* TIMING CODE
@@ -44,9 +42,10 @@ std::cout << "Duration: " << duration.count() << std::endl;
 
 #define _CRT_SECURE_NO_WARNINGS // For MSVC
 
-static void FillRosMessageWithProcessedData(fsae_electric_vehicle::gps*, RaceTrack*);
-static void FillRosMessageWithFrameTwoData(fsae_electric_vehicle::gps*, std::optional<CANData>);
+static void FillRosMessageWithProcessedData(fsae_electric_vehicle::gps*, RaceTrack&);
 static void FillRosMessageWithFrameOneData(fsae_electric_vehicle::gps*, std::optional<CANData>);
+static void FillRosMessageWithFrameTwoData(fsae_electric_vehicle::gps*, point, bool&);
+static point InterpretLatLon(std::optional<CANData>);
 static void Run(float, char *[]);
 static float ConvertToSeconds(char*);
 static void DisplayTime(const uint8_t, const float);
@@ -123,10 +122,14 @@ int main(int argc, char **argv)
 		if (updatedFrames == unitOneFrameOneAndTwo) {
 			//std::cout << "In If" << std::endl;
 			RaceTrack.EstablishStartLine(gpsUnitOneData);
+			//gps_lap_timer.startLine = RaceTrack.getStartLilne();	// Put startLine in ROS message
+			//gps_lap_timer_pub.publish(gps_lap_timer);
 		}
 		else if (updatedFrames = unitTwoFrameOneAndTwo) {
 			//std::cout << "In If 2" << std::endl;
 			RaceTrack.EstablishStartLine(gpsUnitTwoData);
+			//gps_lap_timer.startLine = RaceTrack.getStartLilne();	// Put startLine in ROS message
+			//gps_lap_timer_pub.publish(gps_lap_timer);
 		}
 		else
 			ROS_ERROR("Cannot Establish a Start Line due to at least 1 out of 2 CANBUS frames missing!");
@@ -149,41 +152,43 @@ int main(int argc, char **argv)
 		switch (updatedFrames) {
 			case noFrames: // Do nothing
 				break;
+
 			case unitOneFrameOne:
-				if (gpsUnitOneData.first->data[GPS_FIX]) {
-					
-				}
-				FillRosMessageWithFrameOneData(&gps_lap_timer, gpsUnitOneData.first);
+				if (gpsUnitOneData.first->data[GPS_FIX])
+					FillRosMessageWithFrameOneData(&gps_lap_timer, gpsUnitOneData.first);
 				break;
+
 			case unitOneFrameOneAndTwo:
 				if (gpsUnitOneData.first->data[GPS_FIX]) {
-					//RaceTrack.updateCarCoordinates();	
+					point carCoordinates = InterpretLatLon(gpsUnitTwoData.second);
+					RaceTrack.updateCarCoordinates(carCoordinates);
+					FillRosMessageWithFrameOneData(&gps_lap_timer, gpsUnitOneData.first);
+					FillRosMessageWithFrameTwoData(&gps_lap_timer, carCoordinates, gpsUnitTwoData.second->valid); // Might be able to combine all FillRosMessage() funcs together
+					// Sends current lap time & lap end time. Data points that can be derived by the server: lap num, best lap, best lap time
+					FillRosMessageWithProcessedData(&gps_lap_timer, RaceTrack);
 				}
-
-				FillRosMessageWithFrameOneData(&gps_lap_timer, gpsUnitOneData.first);
-				FillRosMessageWithFrameTwoData(&gps_lap_timer, gpsUnitOneData.second);
 				break;
+
 			case unitTwoFrameOne:
-				FillRosMessageWithFrameOneData(&gps_lap_timer, gpsUnitTwoData.first);
+				if(gpsUnitTwoData.first->data[GPS_FIX])
+					FillRosMessageWithFrameOneData(&gps_lap_timer, gpsUnitTwoData.first);
 				break;
-			case unitTwoFrameOneAndTwo:
-				//RaceTrack.updateCarCoordinates();
 
-				FillRosMessageWithFrameOneData(&gps_lap_timer, gpsUnitOneData.first);
-				FillRosMessageWithFrameTwoData(&gps_lap_timer, gpsUnitTwoData.second);
+			case unitTwoFrameOneAndTwo:
+				if (gpsUnitTwoData.first->data[GPS_FIX]) {
+					point carCoordinates = InterpretLatLon(gpsUnitTwoData.second);
+					RaceTrack.updateCarCoordinates(carCoordinates);
+					FillRosMessageWithFrameOneData(&gps_lap_timer, gpsUnitOneData.first);
+					FillRosMessageWithFrameTwoData(&gps_lap_timer, carCoordinates, gpsUnitTwoData.second->valid);
+					// Sends current lap time & lap end time. Data points that can be derived by the server: lap num, best lap, best lap time
+					FillRosMessageWithProcessedData(&gps_lap_timer, RaceTrack);
+				}
 				break;
 		}
 
-		// Sends current lap time & lap end time. Data points that can be derived by the server: lap num, best lap, best lap time
-		FillRosMessageWithProcessedData(&gps_lap_timer, &RaceTrack);
-
-		/* Other stuff to send to sioSender.cpp
-		start line
-		maybe startHeading
-		*/
-
 		// Send ROS message filled with GPS data to sioSender.cpp
-		gps_lap_timer_pub.publish(gps_lap_timer);
+		if (updatedFrames != noFrames) 
+			gps_lap_timer_pub.publish(gps_lap_timer);
 
 		ros::spinOnce();
    		loop_rate.sleep();
@@ -192,9 +197,13 @@ int main(int argc, char **argv)
 
 
 
-static void FillRosMessageWithProcessedData(fsae_electric_vehicle::gps* gps_lap_timer, RaceTrack*) {
+// Partially fills a struct representing a ROS message with currentLapTimer and lapEndTime
+static void FillRosMessageWithProcessedData(fsae_electric_vehicle::gps* gps_lap_timer, RaceTrack& RaceTrack) {
+	float lapEndTime = RaceTrack.getLapEndTime();
+
 	//gps_lap_timer.currentLapTime = timer
-	//gps_lap_timer.lapEndTime = RaceTrack.getEndTime();
+	if (lapEndTime != 0)
+		gps_lap_timer->lapEndTime = RaceTrack.getLapEndTime();
 }
 
 
@@ -296,17 +305,29 @@ static void FillRosMessageWithFrameOneData(fsae_electric_vehicle::gps* gps_lap_t
 
 
 // Partially fills the struct representing a ROS message with data from second GPS frame. Marks frame as invalid
-static void FillRosMessageWithFrameTwoData(fsae_electric_vehicle::gps* gps_lap_timer, std::optional<CANData> frameTwoData) { // This just needs an optional candata param not a pair
+static void FillRosMessageWithFrameTwoData(fsae_electric_vehicle::gps* gps_lap_timer, point coordinates, bool& frameValid) {
+	// Put lat & lon into the struct representing a ROS message
+	gps_lap_timer->latitude = coordinates.x;
+	gps_lap_timer->longitude = coordinates.y;
+
+	// Mark frame as invalid
+	frameValid = false;
+}
+
+
+
+static point InterpretLatLon(std::optional<CANData> latLonFrame) {
 	int32_t latitude;	// latitude format: DDMM.mmmm		This represents Degrees and Minutes. No seconds
 	int32_t longitude;	// longitude format: DDDMM.mmmm
+	point carCoordinates;
 
 	// Pull the latitude & longitude data from the frame	
 	for (int i = 0; i < 4; i++) {
-		latitude = frameTwoData->data[i];
+		latitude = latLonFrame->data[i];
 		latitude = latitude << 8;
 	}
 	for (int i = 4; i < 8; i++) {
-		longitude = frameTwoData->data[i];
+		longitude = latLonFrame->data[i];
 		longitude = longitude << 8;
 	}
 
@@ -314,12 +335,10 @@ static void FillRosMessageWithFrameTwoData(fsae_electric_vehicle::gps* gps_lap_t
 	float flatitude = static_cast<float>(latitude / 10000);
 	float flongitude = static_cast<float>(longitude / 10000);
 
-	// Put lat & lon into the struct representing a ROS message
-	gps_lap_timer->latitude = latitude;
-	gps_lap_timer->longitude = longitude;
+	carCoordinates.x = flatitude;
+	carCoordinates.y = flongitude;
 
-	// Mark frame as invalid
-	frameTwoData->valid = false;
+	return carCoordinates;
 }
 
 
@@ -442,6 +461,15 @@ IDs at once or do I have to call that function separately for each can frame i w
 one iteration of the while loop in the teensy code will all have the same timestamp. */
 
 // GPS can lose fix at any time. Make sure that fact doesnt cause bugs in the code
+
+// Make as many function arguments as possible const
+
+// Pass arguments by reference and not by pointer when possible in all functions
+
+/* Other stuff to send to sioSender.cpp:
+	start line
+	maybe startHeading
+*/
 
 
 /******************************************************* Unused code *************************************************************
