@@ -31,23 +31,23 @@ public:
         lapEndTime = 0;
     }
 
-    std::string getName() const { return name; }
+    std::string getName() const      { return name; }
 
-    void setName(){
-        this->name = name;
-    }
+    void setName()                   { this->name = name; }
 
-	point getStartPoint() const { return startPoint; }
+	point getStartPoint() const      { return startPoint; }
 
-    line getStartLine() const { return startLine; }
+    line getStartLine() const        { return startLine; }
 
 	uint16_t getStartHeading() const { return startHeading; }
 
-	line getCarCoordinates() const { return carCoordinates; }
+	line getCarCoordinates() const   { return carCoordinates; }
 
-    int getNumOfLaps() { return numOfLaps; }
+    int getNumOfLaps() const         { return numOfLaps; }
 
-    float getLapEndTime() { return lapEndTime; }
+    float getLapEndTime() const      { return lapEndTime; }
+
+    std::pair<unsigned int, float> getBestLapTime() const     { return bestLapTime; }
 
 	void EstablishStartLine(const std::pair<std::optional<CANData>, std::optional<CANData>> gpsUnitData) {
 		float posTimestamp, latitudeCoordinate, longitudeCoordinate;
@@ -106,7 +106,7 @@ private:
 	for the start line. The start line length will have to represent about 20-50 feet in the real world, which will translate to about
 	0.000110 degrees in GPS coordinates. The length of the startline should be user defineable.
 	*/
-
+    //
 	// Construct a startline.
 	void DefineStartLine(const point headingLineCoor, const float sHeading) {
 		point headingLineCoor2;	// Second pair of coodinates that defines an infinite imaginary line (headingLine) lying in the direction the car is facing
@@ -136,55 +136,88 @@ private:
 		startLine.p1.x = temp;
 	}
 
-	// Check if the 2 lines intersect
-	bool LinesIntersect(const line currentCarCoordinates) {
+    /*
+    Determining if two lines intersect is accomplished by taking two points from 'line one' (point one and point two) and a single point from 'line two' (point three).
+    Draw an imaginary line(not realated to imaginary numbers) from the first point to the second point and then another imaginary line from point two 
+    to point three, and then draw anothe imaginary line from point three to the first point. The direction of those imaginary lines will dictate the 'orientaion'.
+    Now do the same thing again but this time change point three to be the point on line two that wasnt used for the previous imaginary triangle. If the orientation
+    of those two triangles are different then the lines may intersect. More steps are needed to determine with certainty if the lines will intersect, but that is
+    the general idea of what is going on in this LinesIntersect() function. A simple google search will show you indetail how to determine if two lines intersect.
+    This problem can also be thought of in terms of vectors and their cross product. The determinant will indicate which orientation the imaginary triangle is 
+    */
+    //
+	// Check if the line between the cars current position and the cars previous position intersects with the startLine. If they do, then that counts as crossing the startLine
+	bool LinesIntersect() {
 		float z;
-		int16_t s1, s2, s3, s4;
+        enum orientation { collinear = 0, clockwise, counterClockwise };
+        orientation orientation1, orientation2, orientation3, orientation4;
 
-		// Quick rejection test.
+		// Quick rejection test
 		if (!(MAX(startLine.p0.x, startLine.p1.x) >= MIN(carCoordinates.p0.x, carCoordinates.p1.x) &&
 			MAX(carCoordinates.p0.x, carCoordinates.p1.x) >= MIN(startLine.p0.x, startLine.p1.x) &&
 			MAX(startLine.p0.y, startLine.p1.y) >= MIN(carCoordinates.p0.y, carCoordinates.p1.y) &&
 			MAX(carCoordinates.p0.y, carCoordinates.p1.y) >= MIN(startLine.p0.y, startLine.p1.y)))
 			return false;
 
-		// Check to see if lines are collinear
+		// Determine orientation of the imaginary triangle. Do this for each of the 4 imaginary triangles
 		if ((z = ((carCoordinates.p0.x - startLine.p0.x) * (startLine.p1.y - startLine.p0.y)) - ((carCoordinates.p0.y - startLine.p0.y) * (startLine.p1.x - startLine.p0.x))) < 0.0f)
-			s1 = -1; // Counterclockwise.
+			orientation1 = counterClockwise; // Counter-Clockwise
 		else if (z > 0.0f)
-			s1 = 1;  // Clockwise.
+			orientation1 = clockwise;  // Clockwise
 		else
-			s1 = 0;  // Collinear.
+			orientation1 = collinear;  // Collinear
 
+        // An interesting thing about this equation.... Its the determinant of the matrix formed by the 4 points that make up the two lines
 		if ((z = ((carCoordinates.p1.x - startLine.p0.x) * (startLine.p1.y - startLine.p0.y)) - ((carCoordinates.p1.y - startLine.p0.y) * (startLine.p1.x - startLine.p0.x))) < 0.0f)
-			s2 = -1;
+			orientation2 = counterClockwise;
 		else if (z > 0.0f)
-			s2 = 1;
+			orientation2 = clockwise;
 		else
-			s2 = 0;
+			orientation2 = collinear;
 
 		if ((z = ((startLine.p0.x - carCoordinates.p0.x) * (carCoordinates.p1.y - carCoordinates.p0.y)) - ((startLine.p0.y - carCoordinates.p0.y) * (carCoordinates.p1.x - carCoordinates.p0.x))) < 0.0f)
-			s3 = -1;
+			orientation3 = counterClockwise;
 		else if (z > 0.0f)
-			s3 = 1;
+			orientation3 = clockwise;
 		else
-			s3 = 0;
+			orientation3 = collinear;
 
 		if ((z = ((startLine.p1.x - carCoordinates.p0.x) * (carCoordinates.p1.y - carCoordinates.p0.y)) - ((startLine.p1.y - carCoordinates.p0.y) * (carCoordinates.p1.x - carCoordinates.p0.x))) < 0.0f)
-			s4 = -1;
+			orientation4 = counterClockwise;
 		else if (z > 0.0f)
-			s4 = 1;
+			orientation4 = clockwise;
 		else
-			s4 = 0;
+			orientation4 = collinear;
 
-		if ((s1 * s2 <= 0) && (s3 * s4 <= 0))
+		if ((orientation1 * orientation2 <= 0) && (orientation3 * orientation4 <= 0))
 			return true;
 
-		return false; // Line segments do not intersect.
+		return false; // Line segments do not intersect
 	}
 
-    /*
-	// 2d lines point of intersection.
+    void wasStartLineCrossed() {
+        if (LinesIntersect()) {
+            // Record lap time with timer
+
+            // Update the new best lap and best lap time if needed
+            if (lapEndTime < bestLapTime.second) {
+                bestLapTime.first = numOfLaps;
+                //bestLapTime.second = currentLapTime;
+            }
+
+            numOfLaps++;
+		} else {
+            lapEndTime = 0;
+        }
+    }
+
+/*
+// These 2 functions are intended to be used for estimating the exact time the car crosses the finish line without needing to increase the GPS update frequency
+// This is done by determining where the point of intersection is between the startLine and the line between the previous car position (carCoordinates.p1) and
+// the current car position (carCoordinates.p0). Once we know the intersection point then we can estimate the exact time the car crossed the line based on its
+// speed while crossing the startLine
+
+	// Determine the point of intersection between two lines
 	void IntersectPoint const(const point p1, const point p2, point* intersectionPoint) {
 		float denom, numera, mua; //numerb, mub;
 
@@ -198,10 +231,6 @@ private:
 		intersectionPoint->x = p1.x + mua * (p2.x - p1.x); // Point-Slope-Form y = m(x - Px) + Py
 		intersectionPoint->y = p1.y + mua * (p2.y - p1.y);
 	}
-    */
-
-    // Check if heading and angle are within 30 degrees of each other
-    bool Within30(const uint16_t a, const uint16_t h) { return ((360 - abs(a - h) % 360 < 30) || (abs(a - h) % 360 < 30)); }
 
     float Distance(const point t1, const point t2) {
 	    float Lat1, Long1, Lat2, Long2;	// Coordinates in degrees.
@@ -235,20 +264,14 @@ private:
 
 	    return d;
     }
+    */
 
-    void wasStartLineCrossed() {
-        if (LinesIntersect(carCoordinates)) {
-            // Record lap time with timer
+/*
+// This function is intended to be used to lower the amount of false positives of the car crossing the startLine. A new lap would only be triggered if
+// the cars heading was between 75 and 105 degrees assuming that the startLine was a straight line pointing in the direction of 0 and 180 degrees on
+// the trigonometric unit circle.
 
-            numOfLaps++;
-
-            // Update the new best lap and best lap time if needed
-            /*if (endLapTime < bestLapTime) {
-                //bestLapTime.first = numOfLaps; 
-                //bestLapTime.second = currentLapTime
-            }*/
-		} else {
-            lapEndTime = 0;
-        }
-    }
+    // Check if heading and angle are within 30 degrees of each other
+    bool Within30(const uint16_t a, const uint16_t h) { return ((360 - abs(a - h) % 360 < 30) || (abs(a - h) % 360 < 30)); }
+*/
 };

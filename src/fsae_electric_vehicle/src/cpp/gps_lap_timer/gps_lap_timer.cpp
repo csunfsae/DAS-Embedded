@@ -1,5 +1,5 @@
 /******************************************************************************************************************************************
- *  This code only works in the PST time zone
+ * This code only works in the PST time zone
  * Im not using the "valid" field within the CANBUS frame
  * 
  * This programs goal is to read the CANBUS frames sent from the Adafruit GPS units and use it to calculate the number of laps, lap times,
@@ -8,14 +8,9 @@
  * location and then checking to see if that line intersects with the start/finish line.
  * getData() runs in less than 0.00006 seconds
  * 
- * I was finguring out how im going to track lap times.
- * I was on line 152. Trying to figure out how to update the carCoordinates of the RaceTrack object
- * 
- * Establish the startLine when the car is driving over 20mph for 5 seconds. That way no physical button is needed for the driver to push.
- * Can the private functions in RaceTrack object be defined as const? LineIntersect() const {}
  * 
  * What Ive done since last commit:
- * Sends lapEndTime & currentLapTime to the server, and almost startLine too.
+ * Program is now able to check if car crossed finish line with accuracy < 50ms.
  * 
 *******************************************************************************************************************************************/
 
@@ -447,7 +442,7 @@ IDs at once or do I have to call that function separately for each can frame i w
 
 // Figure out a way to trigger new lap as accurately as possible
 
-// i was wondering if i should send data to sioSender or process the gps data before establishing startline
+// I was wondering if i should send data to sioSender or process the gps data before establishing startline
 
 /* There may be an issue where the frames stored in gpsUnitOneData pair may be from different GPRMC sentences. For example the 
  first frame may be read & stored in the gpsUnitOneData pair successfully but then for whatever reason the second frame may not
@@ -469,6 +464,17 @@ one iteration of the while loop in the teensy code will all have the same timest
 /* Other stuff to send to sioSender.cpp:
 	start line
 	maybe startHeading
+*/
+
+// Establish the startLine when the car is driving over 20mph for 5 seconds. That way no physical button is needed for the driver to push.
+
+// Can the private functions in RaceTrack object be defined as const? LineIntersect() const {}
+
+/*
+A more accurate startLine crossing time can be obtained by adding the timestamp of the previous car position (carCoordinates.p1) and the 
+timestamp of the current car position (carCoordinates.p0) and dividing by two. Or better yet, find the intersection point of the startLine
+and the line created between the two points in the carCoordinates variable, and use that intersection point to estimate when the car crossed
+the startLine.
 */
 
 
