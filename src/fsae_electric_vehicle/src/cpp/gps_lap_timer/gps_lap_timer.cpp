@@ -1,4 +1,7 @@
 /******************************************************************************************************************************************
+ * Author: Brandon Cobb.
+ * E-mail: btc5472@gmail.com
+ * 
  * This code only works in the PST time zone
  * Im not using the "valid" field within the CANBUS frame
  * 
@@ -8,9 +11,10 @@
  * location and then checking to see if that line intersects with the start/finish line.
  * getData() runs in less than 0.00006 seconds
  * 
+ * I need to auto generate the startLine when car drives over 15mph for 10 seconds.
+ * 
  * 
  * What Ive done since last commit:
- * Program is now able to check if car crossed finish line with accuracy < 50ms.
  * 
 *******************************************************************************************************************************************/
 
@@ -123,6 +127,7 @@ int main(int argc, char **argv)
 		else if (updatedFrames = unitTwoFrameOneAndTwo) {
 			//std::cout << "In If 2" << std::endl;
 			RaceTrack.EstablishStartLine(gpsUnitTwoData);
+			RaceTrack.StartTimer();
 			//gps_lap_timer.startLine = RaceTrack.getStartLilne();	// Put startLine in ROS message
 			//gps_lap_timer_pub.publish(gps_lap_timer);
 		}
@@ -130,6 +135,13 @@ int main(int argc, char **argv)
 			ROS_ERROR("Cannot Establish a Start Line due to at least 1 out of 2 CANBUS frames missing!");
 
 		//std::cout << "AFTER If" << std::endl;
+	}
+
+	auto steadyBool = std::chrono::high_resolution_clock::is_steady;
+	if (steadyBool) {
+		ROS_INFO("Its a steady clock\n");
+	} else {
+		ROS_INFO("Its a non-Steady clock");
 	}
 
 	ros::Rate loop_rate(40); // This means that loop rate can be up to 30 times per second
@@ -156,7 +168,7 @@ int main(int argc, char **argv)
 			case unitOneFrameOneAndTwo:
 				if (gpsUnitOneData.first->data[GPS_FIX]) {
 					point carCoordinates = InterpretLatLon(gpsUnitTwoData.second);
-					RaceTrack.updateCarCoordinates(carCoordinates);
+					RaceTrack.UpdateCarCoordinates(carCoordinates);
 					FillRosMessageWithFrameOneData(&gps_lap_timer, gpsUnitOneData.first);
 					FillRosMessageWithFrameTwoData(&gps_lap_timer, carCoordinates, gpsUnitTwoData.second->valid); // Might be able to combine all FillRosMessage() funcs together
 					// Sends current lap time & lap end time. Data points that can be derived by the server: lap num, best lap, best lap time
@@ -172,7 +184,7 @@ int main(int argc, char **argv)
 			case unitTwoFrameOneAndTwo:
 				if (gpsUnitTwoData.first->data[GPS_FIX]) {
 					point carCoordinates = InterpretLatLon(gpsUnitTwoData.second);
-					RaceTrack.updateCarCoordinates(carCoordinates);
+					RaceTrack.UpdateCarCoordinates(carCoordinates);
 					FillRosMessageWithFrameOneData(&gps_lap_timer, gpsUnitOneData.first);
 					FillRosMessageWithFrameTwoData(&gps_lap_timer, carCoordinates, gpsUnitTwoData.second->valid);
 					// Sends current lap time & lap end time. Data points that can be derived by the server: lap num, best lap, best lap time
@@ -194,11 +206,15 @@ int main(int argc, char **argv)
 
 // Partially fills a struct representing a ROS message with currentLapTimer and lapEndTime
 static void FillRosMessageWithProcessedData(fsae_electric_vehicle::gps* gps_lap_timer, RaceTrack& RaceTrack) {
-	float lapEndTime = RaceTrack.getLapEndTime();
+	auto lapDuration = RaceTrack.GetLapDuration();
+	float fLapDuration = std::chrono::duration<float>(lapDuration).count();
+	if (fLapDuration != 0.0f) {
+		gps_lap_timer->lapEndTime =fLapDuration;
+	}
 
-	//gps_lap_timer.currentLapTime = timer
-	if (lapEndTime != 0)
-		gps_lap_timer->lapEndTime = RaceTrack.getLapEndTime();
+	// Get currentLapTimer and send it
+	auto currentLapTimer = RaceTrack.GetCurrentLapTimer();
+	gps_lap_timer->currentLapTimer = std::chrono::duration<float>(currentLapTimer).count();
 }
 
 
@@ -217,7 +233,7 @@ static void waitForGPSFix(CANController* can,
 		if (canData2.has_value() && canData2->data[GPS_FIX] == 1)
 			break; // No need to copy frames into gpsUnitTwoData
 
-		ROS_INFO_THROTTLE(2, "Waiting for GPS fix!\n");
+		ROS_INFO_THROTTLE(3, "Waiting for GPS fix!\n");
 		ROS_WARN_DELAYED_THROTTLE(120, "Taking a long time to find a GPS fix.");
 
 		std::this_thread::sleep_for(std::chrono::milliseconds(500));
@@ -338,91 +354,6 @@ static point InterpretLatLon(std::optional<CANData> latLonFrame) {
 
 
 
-static void Run(float timeStamp, char *tokens[]) {
-	/*// Lap counters.
-	uint8_t numLaps = 0;
-	uint16_t hzCounter = 1;
-	
-	// Lap data.
-	std::array<lap, 256> race;
-	
-	// Best lap time (lap #, time).
-	std::pair<uint8_t, float> bestTime(0, 0.0f);
-
-	// Note timestamp of startline point.
-	race[numLaps].setStart(timeStamp);
-
-	// Previous position GPS time stamp.
-	float prevTimeStamp = timeStamp;
- 
-	// Confirm sentence is sequential.
-	Doesnt seem like were going to need this function
-	timeStamp = ConvertToSeconds(tokens[RMC_TIME]);
-	if (!Equal(timeStamp, prevTimeStamp + GPS_UPDATE_PERIOD)) {
-		error.SetError(err::ID::TIME_STAMP);
-		ROS_DEBUG("GPS has no fix");
-	}
-
-	// Get current carCoordinates position (lat, lon)
-	// GeoCopy(canData.data[GPS_LATITUDE], temp, LATITUDE);
-
-	// Ignore gps sentences for 1 second after crossing start/finish.
-	if (hzCounter < GPS_UPDATE_FREQUENCY) {
-		hzCounter++;
-
-		// Prepare for next iteration.
-		carCoordinates.p0.x = carCoordinates.p1.x;
-		carCoordinates.p0.y = carCoordinates.p1.y;
-	}
-	
-	
-	// Heading sanity check & check if crossed start/finish line?
-	if (Within30(startHeading, (uint16_t)atol(tokens[RMC_TRACK])) && LineIntersection(carCoordinates)) {
-		point intersectPoint;
-
-		// Calculate track/start line intersection point.
-		IntersectPoint(carCoordinates.p0, carCoordinates.p1, &intersectPoint);
-
-		// Overall length of this track segment.
-		float totDist = Distance(carCoordinates.p0, carCoordinates.p1);
-		// Length from start line intersection point to track segment end point.
-		float segDist = Distance(intersectPoint, carCoordinates.p1);
-
-		// Calculate startline crossing time for this and next lap.
-		float crossTime = timeStamp - (GPS_UPDATE_PERIOD * (segDist / totDist));
-		race[numLaps].setStop(crossTime);		// Record lap end time for the lap just finished
-		race[numLaps + 1].setStart(crossTime);	// Record lap start time for the lap just started
-
-		// Determine current lap stats.
-		DisplayTime(numLaps + 1, race[numLaps].getTime());
-		if (numLaps > 0)
-			DisplayTime(bestTime.first + 1, bestTime.second);
-
-		// Is this lap a new best?
-		if (numLaps == 0 || race[numLaps].getTime() < bestTime.second) {
-			// Announce new fast lap.
-			std::cout << " << Fast Lap";
-			bestTime = std::make_pair(numLaps, race[numLaps].getTime());
-		}
-		std::cout << "\n";
-
-		// Increment counters. These probably dont work
-		numLaps++;
-		hzCounter = 1;
-	}
-
-	// Prepare for next iteration.
-	carCoordinates.p0.x = carCoordinates.p1.x;
-	carCoordinates.p0.y = carCoordinates.p1.y;
-	*/
-}
-
-
-
-// Determine if floats are relatively equal.
-static bool Equal(float a, float b) { return fabs(a - b) <= FLT_EPSILON; }
-
-
 /***************************************************** TODO **********************************************************************/
 // Do I need to create an object called RacingSession that will hold various different races. Races will be made up of laps.
 // Should be able to start & end racing session
@@ -476,6 +407,9 @@ timestamp of the current car position (carCoordinates.p0) and dividing by two. O
 and the line created between the two points in the carCoordinates variable, and use that intersection point to estimate when the car crossed
 the startLine.
 */
+
+/* If no start line is defined then the car will just record all the data as one lap. Then later the user can go into the system and define
+a startline and the DAS should figure out how many laps were done.*/
 
 
 /******************************************************* Unused code *************************************************************

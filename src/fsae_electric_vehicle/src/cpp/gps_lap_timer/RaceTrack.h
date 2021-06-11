@@ -11,13 +11,15 @@ struct line { point p0, p1; };
 class RaceTrack {
 private:
 	std::string name;
-	point		startPoint;			// Coordinate of start/finish location
+	point		startPoint;			// Coordinates of start/finish location
 	line		startLine;			// Defined by two points
-	uint16_t	startHeading;		// Current heading when startLine was created
-	line		carCoordinates;		// Coordinates of current & previous GPS location
+	uint16_t	startHeading;		// Vehicle eading when startLine was created
+	line		carCoordinates;		// Coordinates of current & previous vehicle location
     int         numOfLaps;
-    float       lapEndTime;
-	std::pair<unsigned int, float> bestLapTime;		// Best lap time (lap #, time)
+    std::chrono::_V2::steady_clock::time_point lapStartTime;
+    std::chrono::duration<float> currentLapTimer;
+    std::chrono::duration<float> lapDuration;
+	std::pair<unsigned int, std::chrono::duration<float>> bestLapTime; // Best lap time (lap #, time)
 
 public:
     RaceTrack() {
@@ -27,27 +29,32 @@ public:
         startHeading = 361; // Intentionally > 360 degrees
         carCoordinates.p0.x = 0, carCoordinates.p0.y = 0, carCoordinates.p1.x = 0, carCoordinates.p1.y = 0;
         numOfLaps = 0;
-        bestLapTime.first = 0, bestLapTime.second = 0.0;
-        lapEndTime = 0;
+        lapStartTime = {};
+        lapDuration = {};
+        bestLapTime.first = 0, bestLapTime.second = {};
     }
 
-    std::string getName() const      { return name; }
+    std::string GetName() const      { return name; }
 
-    void setName()                   { this->name = name; }
+    void SetName()                   { this->name = name; }
 
-	point getStartPoint() const      { return startPoint; }
+	point GetStartPoint() const      { return startPoint; }
 
-    line getStartLine() const        { return startLine; }
+    line GetStartLine() const        { return startLine; }
 
-	uint16_t getStartHeading() const { return startHeading; }
+	uint16_t GetStartHeading() const { return startHeading; }
 
-	line getCarCoordinates() const   { return carCoordinates; }
+	line GetCarCoordinates() const   { return carCoordinates; }
 
-    int getNumOfLaps() const         { return numOfLaps; }
+    int GetNumOfLaps() const         { return numOfLaps; }
 
-    float getLapEndTime() const      { return lapEndTime; }
+    auto GetCurrentLapTimer() const   { return currentLapTimer; }
 
-    std::pair<unsigned int, float> getBestLapTime() const     { return bestLapTime; }
+    auto GetLapDuration() const      { return lapDuration; }
+
+    std::pair<unsigned int, std::chrono::duration<float>> GetBestLapTime() const     { return bestLapTime; }
+
+
 
 	void EstablishStartLine(const std::pair<std::optional<CANData>, std::optional<CANData>> gpsUnitData) {
 		float posTimestamp, latitudeCoordinate, longitudeCoordinate;
@@ -71,25 +78,28 @@ public:
 		carCoordinates.p0.x = startPoint.x;
 		carCoordinates.p0.y = startPoint.y;
 
+        ROS_INFO("StartLine is Established!");
+
 		return;
 	}
 
 	// Checks if the start line was crossed, returns bool.
-	void updateCarCoordinates(point newCoordinates) {
-		carCoordinates.p1 = carCoordinates.p0;
-		carCoordinates.p0.x = newCoordinates.x;
+	void UpdateCarCoordinates(point newCoordinates) {
+        auto currentTime = std::chrono::steady_clock::now();
+        currentLapTimer = currentTime - lapStartTime;
+
+		carCoordinates.p1 = carCoordinates.p0;  // Move the cars previous coordinates into p1
+		carCoordinates.p0.x = newCoordinates.x; // New car coordinates always go into p0
         carCoordinates.p0.y = newCoordinates.y;
 
-		wasStartLineCrossed();
+		WasStartLineCrossed(currentTime);
 	}
 
-    void startTimer() {
-
+    void StartTimer() {
+        lapStartTime = std::chrono::steady_clock::now();
     }
 
-    void stopTimer() {
 
-    }
 
 private:
 	/*
@@ -134,6 +144,8 @@ private:
 		temp -= LINE_WIDTH;
 		startLine.p1.y = (m * temp + b);
 		startLine.p1.x = temp;
+
+        ROS_DEBUG("StartLine is defined.");
 	}
 
     /*
@@ -189,25 +201,32 @@ private:
 		else
 			orientation4 = collinear;
 
-		if ((orientation1 * orientation2 <= 0) && (orientation3 * orientation4 <= 0))
-			return true;
+		if ((orientation1 * orientation2 <= 0) && (orientation3 * orientation4 <= 0)) {
+			ROS_DEBUG("StartLine and carCoordinates line intersect!");
+            return true;
+        }
 
 		return false; // Line segments do not intersect
 	}
 
-    void wasStartLineCrossed() {
+    void WasStartLineCrossed(auto currentTime) {
         if (LinesIntersect()) {
-            // Record lap time with timer
+            // Record Lap Duration
+            lapDuration = currentTime - lapStartTime;
+            lapStartTime = currentTime;
+
+            ROS_INFO("Car has crossed the startLine!");
 
             // Update the new best lap and best lap time if needed
-            if (lapEndTime < bestLapTime.second) {
+            if (lapDuration < bestLapTime.second) {
                 bestLapTime.first = numOfLaps;
-                //bestLapTime.second = currentLapTime;
+                bestLapTime.second = lapDuration;
+                ROS_INFO("New best lap time recorded!");
             }
 
             numOfLaps++;
 		} else {
-            lapEndTime = 0;
+            lapDuration = {}; // Reset lapDuration
         }
     }
 
