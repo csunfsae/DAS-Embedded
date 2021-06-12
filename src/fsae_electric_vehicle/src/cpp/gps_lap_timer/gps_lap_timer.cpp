@@ -11,11 +11,11 @@
  * location and then checking to see if that line intersects with the start/finish line.
  * getData() runs in less than 0.00006 seconds
  * 
- * I need to auto generate the startLine when car drives over 15mph for 10 seconds.
  * 
  * 
  * What Ive done since last commit:
- * 
+ * startLine will be auto created when car drives over 5mph for 2s. Data will stop being sent to server if car is under 2mph for 5s, this
+ * feature can also be turned off by setting LOW_SPEED_DATA_LOGGING to be true
 *******************************************************************************************************************************************/
 
 /* TIMING CODE
@@ -40,7 +40,14 @@ std::cout << "Duration: " << duration.count() << std::endl;
 #endif
 
 #define _CRT_SECURE_NO_WARNINGS // For MSVC
+#define LOW_SPEED_DATA_LOGGING 	true
 
+static void WaitForCrossingStartLine(CANController&, RaceTrack&,
+									std::pair<std::optional<CANData>, std::optional<CANData>>&,
+									std::pair<std::optional<CANData>, std::optional<CANData>>&);
+static void EstablishStartLineSpeedMethod(CANController&, RaceTrack&,
+											std::pair<std::optional<CANData>, std::optional<CANData>>&,
+											std::pair<std::optional<CANData>, std::optional<CANData>>&);
 static void FillRosMessageWithProcessedData(fsae_electric_vehicle::gps*, RaceTrack&);
 static void FillRosMessageWithFrameOneData(fsae_electric_vehicle::gps*, std::optional<CANData>);
 static void FillRosMessageWithFrameTwoData(fsae_electric_vehicle::gps*, point, bool&);
@@ -48,7 +55,7 @@ static point InterpretLatLon(std::optional<CANData>);
 static void Run(float, char *[]);
 static float ConvertToSeconds(char*);
 static void DisplayTime(const uint8_t, const float);
-static void waitForGPSFix(CANController*,
+static void WaitForGPSFix(CANController*,
 							std::pair<std::optional<CANData>, std::optional<CANData>>*,
 							std::pair<std::optional<CANData>, std::optional<CANData>>*);
 static validFrame GetGPSData(CANController*,
@@ -75,9 +82,9 @@ int main(int argc, char **argv)
 		exit(-1);
 	}
 
-	// 2 CANBUS frames will need to be received in order to get all the data from one GPRMC sentence
-    // Frame 1 includes hour, minute, seconds, fix, speed, and angle
-    // Frame 2 includes Latitude and Longitude
+	// 2 CANBUS frames will need to be received to get all the data from one GPRMC sentence
+    // Frame 1 (.first) includes hour, minute, seconds, fix, speed, and angle
+    // Frame 2 (.second) includes Latitude and Longitude
 	// One pair contains two CANBUS frames of GPS data from one GPRMC sentence. Each GPS unit emits one GPRMC sentence at a fixed frequency
 	// Store frame with lower id on the left (first) the one with higher id that contains lat & lon data on on the right (second)
 	std::pair<std::optional<CANData>, std::optional<CANData>> gpsUnitOneData; 
@@ -88,25 +95,18 @@ int main(int argc, char **argv)
 	if (ros::console::set_logger_level(ROSCONSOLE_DEFAULT_NAME, ros::console::levels::Debug))
 		ros::console::notifyLoggerLevelsChanged();
 
-	waitForGPSFix(&can, &gpsUnitOneData, &gpsUnitTwoData);
 
-	// If button is pressed to make start line. This is set to true because there is no button to make the startline yet
-	if (true) {
-		// Fill up one GPSUpdateCycle struct with data from one gps cycle. Not data split from 2 cycles of the GPS while loop on Teensy
-		// While either pair is not full
-		ROS_INFO("Establishing the Start Line");
 
-		validFrame updatedFrames = noFrames;
-		do {
-			updatedFrames = GetGPSData(&can, &gpsUnitOneData, &gpsUnitTwoData);
+	ros::Rate loop_rate(40); // This means that loop rate can be up to 40 times per second
+	validFrame updatedFrames = noFrames;
+	auto startLowSpeedTimer = std::chrono::high_resolution_clock::now();
+	auto currentTime = std::chrono::high_resolution_clock::now();
+	std::chrono::duration<float> lowSpeedDuration = currentTime - startLowSpeedTimer;
+	while (ros::ok()) {
+		ROS_DEBUG_ONCE("ROS is ok! Entered the main while loop");
 
-			ROS_WARN_DELAYED_THROTTLE(15, "Trying to read two CANBUS packets with GPS data... Taking longer than expected.");
-
-			std::this_thread::sleep_for(std::chrono::milliseconds(10));
-		} while (updatedFrames != unitOneFrameOneAndTwo && updatedFrames != unitTwoFrameOneAndTwo);
-		//!(updatedFrames != unitOneFrameOneAndTwo) || !(updatedFrames == unitTwoFrameOneAndTwo)
-
-		ROS_INFO("At least one pair is full");
+		// Read CANBUS frames from the CANBUS header
+		updatedFrames = GetGPSData(&can, &gpsUnitOneData, &gpsUnitTwoData);
 
 		// Print out frame
 		std::cout << "UnitOneData:" << std::endl;
@@ -117,41 +117,67 @@ int main(int argc, char **argv)
 		printf("FIX: %u \n", gpsUnitOneData.first->data[GPS_FIX]);
 		printf("Speed: %u \n", gpsUnitOneData.first->data[GPS_SPEED]);
 
-		// Establish startline using just one of the pairs
-		if (updatedFrames == unitOneFrameOneAndTwo) {
-			//std::cout << "In If" << std::endl;
-			RaceTrack.EstablishStartLine(gpsUnitOneData);
-			//gps_lap_timer.startLine = RaceTrack.getStartLilne();	// Put startLine in ROS message
-			//gps_lap_timer_pub.publish(gps_lap_timer);
+		// Car will stop logging data after low speed for 5 seconds
+		// If lowSpeedTimer > 10s, then wait to cross start line and start timer once crossed
+		if (!LOW_SPEED_DATA_LOGGING) { 																					// If Low Speed Data Logging is turned off
+			ROS_INFO_ONCE("Low Speed Data Logging is off. Nothing will be sent to server if car is moving very slow.");
+			if (RaceTrack.GetStartLine().p0.x != 0.0f && RaceTrack.GetStartLine().p0.y != 0.0f && 							// If startLine exists
+				RaceTrack.GetStartLine().p1.x != 0.0f && RaceTrack.GetStartLine().p1.y != 0.0f) {
+					
+				currentTime = std::chrono::high_resolution_clock::now();
+				lowSpeedDuration = currentTime - startLowSpeedTimer;														// Update the duration
+
+				if (lowSpeedDuration.count() > 5.0f) {																		// If duration > 5s
+					startLowSpeedTimer = std::chrono::high_resolution_clock::now();												// Restart timer
+					WaitForCrossingStartLine(can, RaceTrack, gpsUnitOneData, gpsUnitTwoData);									// Wait to cross startLine
+		
+				} else {																									// Else if duration < 5
+					// If speed > 2 then reset timer. If speed < 2 then update duration
+					if (gpsUnitOneData.first->data[GPS_SPEED] > 2) {															// If speed > 2, reset timer and duration
+						startLowSpeedTimer = std::chrono::high_resolution_clock::now();
+						lowSpeedDuration = currentTime - startLowSpeedTimer;
+					} else if (gpsUnitOneData.first->data[GPS_SPEED] < 2)														// Else if speed < 2, update duration
+						lowSpeedDuration = currentTime - startLowSpeedTimer;
+				}
+			}
 		}
-		else if (updatedFrames = unitTwoFrameOneAndTwo) {
-			//std::cout << "In If 2" << std::endl;
-			RaceTrack.EstablishStartLine(gpsUnitTwoData);
-			RaceTrack.StartTimer();
-			//gps_lap_timer.startLine = RaceTrack.getStartLilne();	// Put startLine in ROS message
-			//gps_lap_timer_pub.publish(gps_lap_timer);
+
+		// If GPS doesnt thave fix then wait for fix
+		// If startLine hasnt been created then create one with speed method
+		switch (updatedFrames) {
+			case noFrames: // Do nothing
+				break;
+
+			case unitOneFrameOne:
+				if (!gpsUnitOneData.first->data[GPS_FIX])
+					WaitForGPSFix(&can, &gpsUnitOneData, &gpsUnitTwoData);
+				break;
+
+			case unitOneFrameOneAndTwo:
+				if (!gpsUnitOneData.first->data[GPS_FIX])
+					WaitForGPSFix(&can, &gpsUnitOneData, &gpsUnitTwoData);
+
+				if (RaceTrack.GetStartLine().p0.x == 0.0f && RaceTrack.GetStartLine().p0.y == 0.0f &&
+					RaceTrack.GetStartLine().p1.x == 0.0f && RaceTrack.GetStartLine().p1.y == 0.0f) {
+					EstablishStartLineSpeedMethod(can, RaceTrack, gpsUnitOneData, gpsUnitTwoData);
+				}
+				break;
+
+			case unitTwoFrameOne:
+				if (!gpsUnitTwoData.first->data[GPS_FIX])
+					WaitForGPSFix(&can, &gpsUnitOneData, &gpsUnitTwoData);
+				break;
+
+			case unitTwoFrameOneAndTwo:
+				if (!gpsUnitTwoData.first->data[GPS_FIX])
+					WaitForGPSFix(&can, &gpsUnitOneData, &gpsUnitTwoData);
+
+				if (RaceTrack.GetStartLine().p0.x == 0.0f && RaceTrack.GetStartLine().p0.y == 0.0f &&
+					RaceTrack.GetStartLine().p1.x == 0.0f && RaceTrack.GetStartLine().p1.y == 0.0f) {
+					EstablishStartLineSpeedMethod(can, RaceTrack, gpsUnitOneData, gpsUnitTwoData);
+				}
+				break;
 		}
-		else
-			ROS_ERROR("Cannot Establish a Start Line due to at least 1 out of 2 CANBUS frames missing!");
-
-		//std::cout << "AFTER If" << std::endl;
-	}
-
-	auto steadyBool = std::chrono::high_resolution_clock::is_steady;
-	if (steadyBool) {
-		ROS_INFO("Its a steady clock\n");
-	} else {
-		ROS_INFO("Its a non-Steady clock");
-	}
-
-	ros::Rate loop_rate(40); // This means that loop rate can be up to 30 times per second
-  	
-	validFrame updatedFrames = noFrames;
-	while (ros::ok()) {
-		ROS_INFO_ONCE("ROS is ok! Entered the main while loop");
-
-		// Read CANBUS frames from the CANBUS header
-		updatedFrames = GetGPSData(&can, &gpsUnitOneData, &gpsUnitTwoData);
 
 		// Store data in the ROS Message depending on which frame is recieved
 		// Its ok if we have the first frame but not the second because we can verify that we still have fix.
@@ -204,7 +230,97 @@ int main(int argc, char **argv)
 
 
 
-// Partially fills a struct representing a ROS message with currentLapTimer and lapEndTime
+static void WaitForCrossingStartLine(CANController& can, RaceTrack& RaceTrack,
+									std::pair<std::optional<CANData>, std::optional<CANData>>& gpsUnitOneData,
+									std::pair<std::optional<CANData>, std::optional<CANData>>& gpsUnitTwoData)
+{
+	validFrame updatedFrames;
+	bool crossedStartLine = false;
+	point carCoordinates;
+
+	ROS_INFO("Waiting until the car crosses the startLine again to start the lap timer.");
+
+	while (!crossedStartLine) {
+		updatedFrames = GetGPSData(&can, &gpsUnitOneData, &gpsUnitTwoData);
+
+		if (updatedFrames == unitOneFrameOneAndTwo && gpsUnitOneData.first->data[GPS_FIX]) {
+			carCoordinates = InterpretLatLon(gpsUnitTwoData.second);
+			RaceTrack.UpdateCarCoordinates(carCoordinates);
+			crossedStartLine = RaceTrack.WasStartLineCrossed();
+			ROS_INFO("StartLine has now been crossed, starting lap timer.");
+		} else if (updatedFrames == unitTwoFrameOneAndTwo && gpsUnitTwoData.first->data[GPS_FIX]) {
+			carCoordinates = InterpretLatLon(gpsUnitTwoData.second);
+			RaceTrack.UpdateCarCoordinates(carCoordinates);
+			crossedStartLine = RaceTrack.WasStartLineCrossed();
+			ROS_INFO("StartLine has now been crossed, starting lap timer.");
+		} else {
+			ROS_WARN("While waiting for car to cross startLine, the 2nd CANBUS frame containing lat & lon couldnt be read");
+		}
+	}
+}
+
+
+
+static void EstablishStartLineSpeedMethod(CANController& can, RaceTrack& RaceTrack,
+											std::pair<std::optional<CANData>, std::optional<CANData>>& gpsUnitOneData,
+											std::pair<std::optional<CANData>, std::optional<CANData>>& gpsUnitTwoData) 
+	{
+	validFrame updatedFrames = noFrames;
+	std::chrono::_V2::steady_clock::time_point startOfTimer = std::chrono::steady_clock::now();
+	std::chrono::_V2::steady_clock::time_point currentTime = std::chrono::steady_clock::now();
+	std::chrono::duration<float> durationOfTimer = currentTime - startOfTimer;
+	
+	// Wait to Establish Startline until the car travels over 20mph for 20 seconds
+	while (durationOfTimer.count() < 2.0f) {
+		updatedFrames = GetGPSData(&can, &gpsUnitOneData, &gpsUnitTwoData);
+
+		if (updatedFrames >= unitTwoFrameOne && gpsUnitTwoData.first->data[GPS_SPEED] < 5) {
+			startOfTimer = std::chrono::steady_clock::now();
+		} else if (updatedFrames >= unitOneFrameOne && gpsUnitOneData.first->data[GPS_SPEED] < 5)
+			startOfTimer = std::chrono::steady_clock::now();
+
+		currentTime = std::chrono::steady_clock::now();
+		durationOfTimer = currentTime - startOfTimer;
+
+		std::this_thread::sleep_for(std::chrono::milliseconds(500));
+	}
+
+	ROS_INFO("Car has traveled over 5mph for 2 seconds. Establishing start line now");
+
+	// Wait for both frames from a single GPS unit to be received
+	do {
+		updatedFrames = GetGPSData(&can, &gpsUnitOneData, &gpsUnitTwoData);
+
+		ROS_WARN_DELAYED_THROTTLE(15, "Trying to read two CANBUS packets with GPS data... Taking longer than expected.");
+
+		std::this_thread::sleep_for(std::chrono::milliseconds(10));
+	} while (updatedFrames != unitOneFrameOneAndTwo && updatedFrames != unitTwoFrameOneAndTwo);
+
+	ROS_DEBUG("At least one pair is full");
+
+	// Establish startline using just one of the pairs
+	if (updatedFrames == unitOneFrameOneAndTwo) {
+		//std::cout << "In If" << std::endl;
+		RaceTrack.EstablishStartLine(gpsUnitOneData);
+		RaceTrack.StartTimer();
+		// These lines below are commented out because ther is no startLine object/field in ROS message
+		//gps_lap_timer.startLine = RaceTrack.getStartLilne();	// Put startLine in ROS message
+		//gps_lap_timer_pub.publish(gps_lap_timer);
+	}
+	else if (updatedFrames = unitTwoFrameOneAndTwo) {
+		//std::cout << "In If 2" << std::endl;
+		RaceTrack.EstablishStartLine(gpsUnitTwoData);
+		RaceTrack.StartTimer();
+		//gps_lap_timer.startLine = RaceTrack.getStartLilne();	// Put startLine in ROS message
+		//gps_lap_timer_pub.publish(gps_lap_timer);
+	}
+	else
+		ROS_ERROR("Cannot Establish a Start Line due to at least 1 out of 2 CANBUS frames missing!");
+}
+
+
+
+// Partially fills a struct representing a ROS message with lapDuration and currentLapTimer
 static void FillRosMessageWithProcessedData(fsae_electric_vehicle::gps* gps_lap_timer, RaceTrack& RaceTrack) {
 	auto lapDuration = RaceTrack.GetLapDuration();
 	float fLapDuration = std::chrono::duration<float>(lapDuration).count();
@@ -220,7 +336,7 @@ static void FillRosMessageWithProcessedData(fsae_electric_vehicle::gps* gps_lap_
 
 
 // Doesnt return until a GPS fix is found
-static void waitForGPSFix(CANController* can,
+static void WaitForGPSFix(CANController* can,
 						std::pair<std::optional<CANData>, std::optional<CANData>>* gpsUnitOneData,
 						std::pair<std::optional<CANData>, std::optional<CANData>>* gpsUnitTwoData)
 	{
@@ -291,7 +407,7 @@ static validFrame GetGPSData(CANController* can,
 			return unitTwoFrameOneAndTwo;
 		}
 
-		ROS_WARN("First CANBUSframe for GPS 1 and GPS 2 were read, but not the second frame for GPS 1 and 2 containing latitude & longitude.");
+		ROS_WARN("First CANBUS frame from GPS was read, but not the second frame containing latitude & longitude.");
 
 		return unitTwoFrameOne;
 	}
@@ -354,9 +470,7 @@ static point InterpretLatLon(std::optional<CANData> latLonFrame) {
 
 
 
-/***************************************************** TODO **********************************************************************/
-// Do I need to create an object called RacingSession that will hold various different races. Races will be made up of laps.
-// Should be able to start & end racing session
+/************************************************************ TODO **********************************************************************/
 
 /* This program needs to read all CANBUS frames that pertain to the GPS units. That means reading ALL CANBUS frames that it sees
 and then filtering out the ones that it wants based on the frame ID.
@@ -370,10 +484,6 @@ Can the this function call "can.getData(0x37, 0x1FFFFFFF);" be used to filter ou
 IDs at once or do I have to call that function separately for each can frame i want to filter out? */
 
 // Vehicle data should be stored locally on the TX2 if there is no connection to the server
-
-// Figure out a way to trigger new lap as accurately as possible
-
-// I was wondering if i should send data to sioSender or process the gps data before establishing startline
 
 /* There may be an issue where the frames stored in gpsUnitOneData pair may be from different GPRMC sentences. For example the 
  first frame may be read & stored in the gpsUnitOneData pair successfully but then for whatever reason the second frame may not
@@ -408,7 +518,7 @@ and the line created between the two points in the carCoordinates variable, and 
 the startLine.
 */
 
-/* If no start line is defined then the car will just record all the data as one lap. Then later the user can go into the system and define
+/* If no start line is defined then the car should just record all the data as one lap. Then later the user can go into the system and define
 a startline and the DAS should figure out how many laps were done.*/
 
 

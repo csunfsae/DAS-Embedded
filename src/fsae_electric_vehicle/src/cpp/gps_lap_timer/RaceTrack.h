@@ -11,11 +11,12 @@ struct line { point p0, p1; };
 class RaceTrack {
 private:
 	std::string name;
-	point		startPoint;			// Coordinates of start/finish location
-	line		startLine;			// Defined by two points
-	uint16_t	startHeading;		// Vehicle eading when startLine was created
-	line		carCoordinates;		// Coordinates of current & previous vehicle location
-    int         numOfLaps;
+	point		    startPoint;			// Coordinates of start/finish location
+	line		    startLine;			// Defined by two points
+	uint16_t	    startHeading;		// Vehicle eading when startLine was created
+	line		    carCoordinates;		// Coordinates of current & previous vehicle location
+    unsigned int    numOfLaps;
+    bool crossedStartLine;
     std::chrono::_V2::steady_clock::time_point lapStartTime;
     std::chrono::duration<float> currentLapTimer;
     std::chrono::duration<float> lapDuration;
@@ -29,6 +30,7 @@ public:
         startHeading = 361; // Intentionally > 360 degrees
         carCoordinates.p0.x = 0, carCoordinates.p0.y = 0, carCoordinates.p1.x = 0, carCoordinates.p1.y = 0;
         numOfLaps = 0;
+        crossedStartLine = false;
         lapStartTime = {};
         lapDuration = {};
         bestLapTime.first = 0, bestLapTime.second = {};
@@ -48,7 +50,9 @@ public:
 
     int GetNumOfLaps() const         { return numOfLaps; }
 
-    auto GetCurrentLapTimer() const   { return currentLapTimer; }
+    bool WasStartLineCrossed() const { return crossedStartLine; }
+
+    auto GetCurrentLapTimer() const  { return currentLapTimer; }
 
     auto GetLapDuration() const      { return lapDuration; }
 
@@ -215,6 +219,8 @@ private:
             lapDuration = currentTime - lapStartTime;
             lapStartTime = currentTime;
 
+            crossedStartLine = true;
+
             ROS_INFO("Car has crossed the startLine!");
 
             // Update the new best lap and best lap time if needed
@@ -227,6 +233,7 @@ private:
             numOfLaps++;
 		} else {
             lapDuration = {}; // Reset lapDuration
+            crossedStartLine = false;
         }
     }
 
