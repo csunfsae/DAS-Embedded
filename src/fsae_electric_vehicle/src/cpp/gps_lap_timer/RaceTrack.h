@@ -8,10 +8,12 @@
 struct point { float x, y; };
 struct line { point p0, p1; };
 
+static point InterpretLatLon(std::optional<CANData>);
+
 class RaceTrack {
 private:
 	std::string name;
-	point		    startPoint;			// Coordinates of start/finish location
+	point		    startingCoordinates;			// Coordinates of start/finish location
 	line		    startLine;			// Defined by two points
 	uint16_t	    startHeading;		// Vehicle eading when startLine was created
 	line		    carCoordinates;		// Coordinates of current & previous vehicle location
@@ -25,8 +27,8 @@ private:
 public:
     RaceTrack() {
         name = "Unknown";
-        startPoint.x = 0, startPoint.y = 0; // Null Island
-        startLine.p0.x = 0, startLine.p0.y = 0, startLine.p1.x = 0, startLine.p1.y = 0;
+        startingCoordinates.x = 0, startingCoordinates.y = 0; // Null Island
+        startLine.p0.x = 0.0f, startLine.p0.y = 0.0f, startLine.p1.x = 0.0f, startLine.p1.y = 0.0f;
         startHeading = 361; // Intentionally > 360 degrees
         carCoordinates.p0.x = 0, carCoordinates.p0.y = 0, carCoordinates.p1.x = 0, carCoordinates.p1.y = 0;
         numOfLaps = 0;
@@ -40,7 +42,7 @@ public:
 
     void SetName()                   { this->name = name; }
 
-	point GetStartPoint() const      { return startPoint; }
+	point GetStartPoint() const      { return startingCoordinates; }
 
     line GetStartLine() const        { return startLine; }
 
@@ -61,7 +63,6 @@ public:
 
 
 	void EstablishStartLine(const std::pair<std::optional<CANData>, std::optional<CANData>> gpsUnitData) {
-		float posTimestamp, latitudeCoordinate, longitudeCoordinate;
 
 		// Verify that GPS has fix
 		if (!gpsUnitData.first->data[GPS_FIX]) {
@@ -69,18 +70,17 @@ public:
 			return;
 		}
 		// Get current coordinates of car (lat, lon)
-		//startPoint.x = 
-		//startPoint.y = 
+		startingCoordinates = InterpretLatLon(gpsUnitData.second);
 
 		// Heading while crossing start/finish. Vehicle should be as parallel to the sides of the track as possible
 		startHeading = gpsUnitData.first->data[GPS_HEADING_1];
 
 		// Define startline
-		DefineStartLine(startPoint, static_cast<float>(startHeading));
+		DefineStartLine(startingCoordinates, static_cast<float>(startHeading));
 
 		// Set the current carCoordinates position
-		carCoordinates.p0.x = startPoint.x;
-		carCoordinates.p0.y = startPoint.y;
+		carCoordinates.p0.x = startingCoordinates.x;
+		carCoordinates.p0.y = startingCoordinates.y;
 
         ROS_INFO("StartLine is Established!");
 
@@ -122,15 +122,15 @@ private:
 	*/
     //
 	// Construct a startline.
-	void DefineStartLine(const point headingLineCoor, const float sHeading) {
+	void DefineStartLine(const point headingLineCoor, const float startHeading) {
 		point headingLineCoor2;	// Second pair of coodinates that defines an infinite imaginary line (headingLine) lying in the direction the car is facing
 		float m, b, temp;			// Slope & y-intercept of that line
 
 		// Create another (x,y) coordinate that lies in the same line as headingLine
 		// This creates a line in our imaginary 2d plane that points in the direction the car is facing
 		// This line is used for creating a startline that is perpendicular to this one that is being created
-		headingLineCoor2.x = headingLineCoor.x + PROJECTION_DISTANCE * cos(DEGTORAD(sHeading));
-		headingLineCoor2.y = headingLineCoor.y + PROJECTION_DISTANCE * sin(DEGTORAD(sHeading));
+		headingLineCoor2.x = headingLineCoor.x + PROJECTION_DISTANCE * cos(DEGTORAD(startHeading));
+		headingLineCoor2.y = headingLineCoor.y + PROJECTION_DISTANCE * sin(DEGTORAD(startHeading));
 		
 		// Calculate the slope & y-intercept of headingLine 
 		m = (headingLineCoor.y - headingLineCoor2.y) / (headingLineCoor.x - headingLineCoor2.x);

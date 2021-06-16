@@ -48,7 +48,7 @@ FlexCAN_T4<CAN1, RX_SIZE_256, TX_SIZE_16> canbus; /* CAN2 is Teensy4.1 pins 0 & 
 Adafruit_GPS GPS(&GPSSerial2);        // Connect to the GPS units on separate hardware serial ports
 //Adafruit_GPS GPS2(&GPSSerial1);
 
-#define PGCMD_ANTENNA "$PGCMD,33,1*6C" // request for updates on antenna status
+#define PGCMD_ANTENNA "$PGCMD,33,1*6C" // Request for updates on antenna status
 #define PGCMD_NOANTENNA "$PGCMD,33,0*6D"
 //GPS.sendCommand(PGCMD_ANTENNA); // ON
 
@@ -74,7 +74,7 @@ void setup(void)
   // the parser doesn't care about other sentences at this time
 
   // Set the GPS update rate
-  GPS.sendCommand(PMTK_SET_NMEA_UPDATE_1HZ);  /* For the parsing code to work nicely and have time to sort thru the data, and
+  GPS.sendCommand(PMTK_SET_NMEA_UPDATE_10HZ);  /* For the parsing code to work nicely and have time to sort thru the data, and
                            print it out we don't suggest using anything higher than 1 Hz */
 
   // Request updates on antenna status, comment out to keep quiet
