@@ -11,10 +11,14 @@
  * location and then checking to see if that line intersects with the start/finish line.
  * getData() runs in less than 0.00006 seconds
  * 
- * 
+ * I was trying to pass gpsLatitude and gpsLongitude into the gpsCallback function but boost::bind wont take more than 9 params. So to solve
+ * that i was thinking of removing Hours, minutes, & seconds from the data field and merging that into one value somehow.
  * 
  * What Ive done since last commit:
  * Started to log data to a file in sioSender.  Organized sioSender. sioSender only sends updated fields to the server.
+ * 
+ * All data except coordinate are logged to file. sioSender sends coordinates to server. We wont be using Lap.h.
+ * Teensy syncs its time with GPS. Teensy ready to send time/date info in CANBUS frame timestamp field.
 *******************************************************************************************************************************************/
 
 /* TIMING CODE
@@ -30,7 +34,7 @@ std::cout << "Duration: " << duration.count() << std::endl;
 #include <thread>
 #include <chrono>
 #include "RaceTrack.h"
-#include "Lap.h"
+//#include "Lap.h"
 
 #ifdef _WIN32	// If in a Windows environment
 #include <Windows.h>
@@ -402,12 +406,17 @@ static point InterpretLatLon(std::optional<CANData> latLonFrame) {
 
 // Partially fills the struct representing a ROS message with data from first GPS frame. Marks frame as invalid
 static void FillRosMessageWithFrameOneData(fsae_electric_vehicle::gps* gps_lap_timer, std::optional<CANData> frameOneData) { // This just needs an optional candata param not a pair
+	uint16_t heading;
+	
 	gps_lap_timer->hours = frameOneData->data[0];		// Time data
 	gps_lap_timer->minutes = frameOneData->data[1];		// Time data
 	gps_lap_timer->seconds = frameOneData->data[2];		// Time data
 	gps_lap_timer->fix = frameOneData->data[3];
 	gps_lap_timer->speed = frameOneData->data[4];
-	gps_lap_timer->heading = frameOneData->data[5] & frameOneData->data[6]; // This may cause gps_lap_timer.heading to be read wrong since its not a uint16_t
+
+ 	heading = frameOneData->data[5];
+	heading = heading << 8;
+	gps_lap_timer->heading = heading | frameOneData->data[6];
 
 	frameOneData->valid = false; // Mark frame as invalid
 }

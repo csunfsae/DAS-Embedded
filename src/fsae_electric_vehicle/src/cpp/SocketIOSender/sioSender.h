@@ -53,11 +53,11 @@ sio::message::ptr createObject(json o)
 }
 
 sio::message::ptr createObject(json );
-void suspensionCallback(const fsae_electric_vehicle::suspension::ConstPtr&, float&, float&, float&, float&);
-void batteryCallback(const fsae_electric_vehicle::drive_train::ConstPtr&, float&);
-void coolantCallback(const fsae_electric_vehicle::coolant::ConstPtr&, float&);
-void brakeCallback(const fsae_electric_vehicle::brake_pressure::ConstPtr&, float&);
-void gpsCallback(const fsae_electric_vehicle::gps::ConstPtr&, float&, float&, float&, float&, float&, float&, float&, float&);
-void speedCallback(const fsae_electric_vehicle::speedometer::ConstPtr&, float&);
-void ResetValues(float&, float&, float&, float&, float&, float&, float&, float&,float&, float&, float&, float&,float&, float&, float&, float&);
-void logToFile(std::string, float, std::ofstream&);
+void SuspensionCallback(const fsae_electric_vehicle::suspension::ConstPtr&, float&, float&, float&, float&);
+void BatteryCallback(const fsae_electric_vehicle::drive_train::ConstPtr&, float&);
+void CoolantCallback(const fsae_electric_vehicle::coolant::ConstPtr&, float&);
+void BrakeCallback(const fsae_electric_vehicle::brake_pressure::ConstPtr&, float&);
+void GpsCallback(const fsae_electric_vehicle::gps::ConstPtr&, float&, float&, float&, float&, float&, float&, float&, float&);
+void SpeedCallback(const fsae_electric_vehicle::speedometer::ConstPtr&, float&);
+void ResetValues(float&, float&, float&, float&, float&, float&, float&, float&, float&, float&, float&, float&, float&, float&, float&, float&, float&, float&);
+void LogToFile(std::string, float, std::ofstream&);

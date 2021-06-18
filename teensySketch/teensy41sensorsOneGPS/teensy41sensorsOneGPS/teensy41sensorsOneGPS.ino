@@ -4,6 +4,12 @@
  * reads the data coming from the analong sensors on the vehicle and sends that over the
  * CANBUS network too.
  * 
+ * The GPS.angle value will not be accurate while moving at slow speeds. This is a promlem with all GPS units
+ * 
+ * GPS.milliseconds variable seems to only be updated every 100ms when the GPS is set to update at 10hz. So GPS.milliseconds will only
+ * have values that are multiples of 100ms. When the GPS is set at 1hz update rate then it seems like GPS.milliseconds will always be
+ * 000 because the nmea string is timestamped at the beginning of every second.
+ * 
  * Connect the GPS Power pin to 5V (stable power is better)
  * Connect the GPS Ground pin to ground
  * Connect the GPS TX (transmit) pin to Digital serial RX pin on teensy 4.1
@@ -21,12 +27,21 @@
  * Example: ,$4G8P,G1S6V0,,33,03,,1152,,4143,,12043,,03618,,2461,,2186,,22803,,34120,,1204,,2065,,21287,,04415*,7253,
  *  
  *  Sometimes when the GPS units start up, they output all gps sentences, not just GPRMC
+ *  
+ *  So I want to put Hours, mins, secs variables into the timestamp in the canbus frame. The GPS updates every 100ms
+ *  starting at 000ms. There will be other sensors connected to the Teensy and I need a way to timestamp the sensor
+ *  frames too with a clock synchronized to the GPS time (UTC). First way of doing that is to use TimeLib.h and sync
+ *  the local time of the teensy to match the GPS time. Another way is to sync the local teensy clock to be equal to
+ *  UTC time using NTP and just assume that the GPS time (which is given in UTC) is very accurately synced up with
+ *  the local UTC time of the teensy.
  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!*/
 
 // TEENSY SENDS GPS DATA TO SERVER. LAT & LON ARE NOT CORRECT. 
 
 #include <FlexCAN_T4.h>               // FlexCan library for Teensy 4.0 and 4.1 ONLY
 #include <Adafruit_GPS.h>
+#include <TimeLib.h>
+#include <chrono>
 
 // Set GPSECHO to 'false' to turn off echoing the GPS data to the arduino Serial console
 // Set to 'true' if you want to debug and listen to the raw GPS sentences
@@ -37,10 +52,11 @@
 const int ledPin =  LED_BUILTIN;      // The pin number for LED
 int ledState = LOW;                   // ledState used to set the LED
 const long interval = 1000;           // Interval at which to blink LED on Teensy (milliseconds)
+unsigned long currentMillis = 0;
 unsigned long previousMillis = 0;     // Will store last time the Teensy LED was updated
 
 static CAN_message_t canMsg;          // Structure of a CANBUS message that is sent over Teensy CANBUS port
-uint32_t gpsTimer = millis();         // Used for printing & sending GPS data once per unit of time
+uint32_t gpsMillis = millis();         // Used for keeping track of how many ms elapse between GPS updates
 
 FlexCAN_T4<CAN1, RX_SIZE_256, TX_SIZE_16> canbus; /* CAN2 is Teensy4.1 pins 0 & 1.
                                                      CAN3 pins support regular CAN2.0 and CANFD modes */
@@ -57,8 +73,9 @@ Adafruit_GPS GPS(&GPSSerial2);        // Connect to the GPS units on separate ha
 // -------------------------------------------------------------------------------------------------------------------
 void setup(void)
 {
-  Serial.println("Adafruit GPS basic test!");
-  Serial.begin(9600);         // Allows arduino (not Teensy) to communicate with the arduino serial monitor
+  //Serial.begin(115200);     // Allows arduino (not Teensy) to communicate with the arduino serial monitor
+  //delay(1500);                // Wait this amount of time otherwise not all text will be sent to the serial monitor    
+  Serial.println("Adafruit GPS test!");
   pinMode(ledPin, OUTPUT);    // Set the digital pin as output
   canbus.begin();
   canbus.setBaudRate(500000); // This value has to match the baud rate on the Quasar/Jetson TX2 board
@@ -74,11 +91,17 @@ void setup(void)
   // the parser doesn't care about other sentences at this time
 
   // Set the GPS update rate
-  GPS.sendCommand(PMTK_SET_NMEA_UPDATE_10HZ);  /* For the parsing code to work nicely and have time to sort thru the data, and
+  GPS.sendCommand(PMTK_SET_NMEA_UPDATE_5HZ);  /* For the parsing code to work nicely and have time to sort thru the data, and
                            print it out we don't suggest using anything higher than 1 Hz */
 
   // Request updates on antenna status, comment out to keep quiet
   //GPS.sendCommand(PGCMD_ANTENNA);
+
+
+  delay(1000);
+  
+  // Uncomment this line to ask the GPS for its firmware version
+  //GPSSerial2.println(PMTK_Q_RELEASE);
 }
 
 
@@ -86,28 +109,9 @@ void setup(void)
 // -------------------------------------------------------------------------------------------------------------------
 void loop(void)
 {
-  // Blink the LED
-  unsigned long currentMillis = millis();
-  if (currentMillis - previousMillis >= interval) {
-    previousMillis = currentMillis;     // Save the last time you blinked the LED
+  BlinkLED();
 
-    // If the LED is off turn it on and vice-versa
-    if (ledState == LOW)
-      ledState = HIGH;
-    else
-      ledState = LOW;
-
-    digitalWrite(ledPin, ledState);     // Set the LED with the ledState of the variable
-  }
-
-  // Print out raw GPS data to audino serial console for each GPS separately
-  char c = GPS.read();
-  if (c == '$')
-    Serial.write("\n");
-  while ((c) && (GPSECHO)) {
-    Serial.write(c);  // Writes one char, not entire string
-    c = GPS.read();   // Reads one char, not entire string
-  }
+  PrintRawGpsSentence();
 
   // A tricky thing here is if we print the NMEA sentence, or data
   // we end up not listening and catching other sentences!
@@ -115,28 +119,46 @@ void loop(void)
   //
   // If a sentence is received, we can check the checksum, parse it...
   if (GPS.newNMEAreceived()) {
+    gpsMillis = millis();              // Reset the timer
+    
     Serial.println("NMEA has been received on GPS1!");
-    if (!GPS.parse(GPS.lastNMEA())) {}  // This also sets the newNMEAreceived() flag to false
-      //return;                         // We can fail to parse a sentence in which case we should just wait for another
-
-    gpsTimer = millis();                // Reset the timer
+    
+    if (!GPS.parse(GPS.lastNMEA())) {  // This also sets the newNMEAreceived() flag to false
+      Serial.println("Failed to parse lastNMEA\n");
+      return;                         // We can fail to parse a sentence in which case we should just wait for another
+    }
+    
+    SyncClockUTC(); // Clock sync is only done once when Teensy starts up and GPS has fix
+    
+    // Print out current time
+    time_t t = now();
+    Serial.println("time_t: ");
+    Serial.println(hour(t));
+    Serial.println(minute(t));
+    Serial.println(second(t));
+    Serial.println(month(t));
+    Serial.println(day(t));
+    Serial.println(year(t));
+    Serial.println("New Line Printed");
+    //Serial.println(sizeof(time type that id like to send));
+    
     Serial.print("GPS Timer (ms): ");
-    Serial.print(gpsTimer);
+    Serial.print(gpsMillis);
     int gpsNum = 1;
-    printGPSStats(GPS, gpsNum);
+    PrintGPSStats(GPS, gpsNum);
 
     // 2 CANBUS frames will be sent to include all data
     // Frame 1 includes hour, minute, seconds, fix, speed, angle
     // Frame 2 includes Latitude and Longitude
-    fillCanbusFrameOne(GPS, gpsNum, gpsTimer);  // Fill CANBUS struct with 1st part of GPS1 data that we want to send
+    FillCanbusFrameOne(GPS, gpsNum, gpsMillis);  // Fill CANBUS struct with 1st part of GPS1 data that we want to send
     canbus.read(canMsg);          // CANBUS pin will read the canMsg struct just populated with data  
-    Serial.println("____FRAME ONE___ "); canSniff();               // Print out CAN frame
+    Serial.println("____FRAME ONE___ "); CanSniff();               // Print out CAN frame
     canbus.write(canMsg);         // Send packet over CANBUS
 
 
-    fillCanbusFrameTwo(GPS, gpsNum, gpsTimer);  // Fill CANBUS struct with 2nd part of GPS1 data that we want to send
+    FillCanbusFrameTwo(GPS, gpsNum, gpsMillis);  // Fill CANBUS struct with 2nd part of GPS1 data that we want to send
     canbus.read(canMsg);        // CANBUS pin will read the canMsg struct just populated with data  
-    Serial.println("____FRAME TWO___ "); canSniff();               // Print out CAN frame
+    Serial.println("____FRAME TWO___ "); CanSniff();               // Print out CAN frame
     canbus.write(canMsg);       // Send packet over CANBUS
 
     /*
@@ -147,11 +169,6 @@ void loop(void)
     it is in the middle of writting that information to a canbus packet. Or maybe the funciton that
     gives me date and time already does that for me.
     */
-  }
-
-  // Print the info received from GPS and then send CANBUS packets with a max # of times per second
-  if (millis() - gpsTimer > 2000) {
-
   }
   
   /*//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -194,10 +211,10 @@ void loop(void)
 
 
 
-void fillCanbusFrameOne(Adafruit_GPS GPS, int gpsNum, uint32_t gpsTimer) {
+void FillCanbusFrameOne(Adafruit_GPS GPS, int gpsNum, uint32_t gpsTimer) {
   canMsg.flags.extended = 0;
   canMsg.flags.remote = 0;
-  canMsg.timestamp = gpsTimer;
+  canMsg.timestamp = 0; // # of milllis elapsed since whenever, or DDDDDDHHMMSSsss
   
   if (gpsNum == 1)
     canMsg.id = 0x35;        // The gps_lap_timer.cpp code is looking for these hex values
@@ -218,10 +235,11 @@ void fillCanbusFrameOne(Adafruit_GPS GPS, int gpsNum, uint32_t gpsTimer) {
 
 
 
-void fillCanbusFrameTwo(Adafruit_GPS GPS, int gpsNum, uint32_t gpsTimer) {
+void FillCanbusFrameTwo(Adafruit_GPS GPS, int gpsNum, uint32_t gpsTimer) {
   canMsg.flags.extended = 0;
   canMsg.flags.remote = 0;
-  canMsg.timestamp = gpsTimer;
+  canMsg.timestamp = 0;
+  // I need to send time accurate to ms in the 64 bit timestamp field here.
   
   if (gpsNum == 1)
     canMsg.id = 0x36;
@@ -247,7 +265,7 @@ void fillCanbusFrameTwo(Adafruit_GPS GPS, int gpsNum, uint32_t gpsTimer) {
 
 
 
-void printGPSStats (Adafruit_GPS GPS, int gpsNum) {
+void PrintGPSStats (Adafruit_GPS GPS, int gpsNum) {
   Serial.print("\nStats for GPS ");
   Serial.print(gpsNum);
   Serial.print(":");
@@ -263,6 +281,7 @@ void printGPSStats (Adafruit_GPS GPS, int gpsNum) {
   } else if (GPS.milliseconds > 9 && GPS.milliseconds < 100) {
     Serial.print("0");
   }
+
     Serial.println(GPS.milliseconds);
     Serial.print("Date: ");
     Serial.print(GPS.day, DEC); Serial.print('/');
@@ -285,7 +304,7 @@ void printGPSStats (Adafruit_GPS GPS, int gpsNum) {
 
 
 // Print out the data contained in canMsg to the arduino serial consol
-void canSniff() {
+void CanSniff() {
     Serial.print("MB "); Serial.print(canMsg.mb);
     Serial.print("  OVERRUN: "); Serial.print(canMsg.flags.overrun);
     Serial.print("  LEN: "); Serial.print(canMsg.len);
@@ -299,16 +318,80 @@ void canSniff() {
   Serial.println();
 }
 
+
+
+void BlinkLED() {
+  // Blink the LED
+  currentMillis = millis();
+  if (currentMillis - previousMillis >= interval) {
+    previousMillis = currentMillis;     // Save the last time you blinked the LED
+
+    // If the LED is off turn it on and vice-versa
+    if (ledState == LOW)
+      ledState = HIGH;
+    else
+      ledState = LOW;
+
+    digitalWrite(ledPin, ledState);     // Set the LED with the ledState of the variable
+  }
+}
+
+
+
+// Print out raw GPS data to audino serial console
+void PrintRawGpsSentence() {
+  char c = GPS.read();
+  if (c == '$')
+    Serial.write("\n");
+  while ((c) && (GPSECHO)) {
+    Serial.write(c);  // Writes one char, not entire string
+    c = GPS.read();   // Reads one char, not entire string
+  }
+}
+
+
+
+// Try to sync clock only if GPS has a fix
+void SyncClockUTC() {
+  if (timeStatus() != timeSet && GPS.fix == 1) {
+    byte aHour = GPS.hour, aMinute = GPS.minute, aSecond = GPS.seconds, aMonth = GPS.month, aDay = GPS.day;
+    int aYear = GPS.year;
+    
+    setTime(aHour, aMinute, aSecond, aDay, aMonth, aYear);
+
+    if (timeStatus() != timeSet)
+      Serial.println("Unable to sync with the RTC");
+    else
+      Serial.println("RTC has been set");
+      
+  } else if (timeStatus() == timeSet) {
+    Serial.println("RTC already set");
+  }
+  else if (GPS.fix == 0) {
+    Serial.println("Cant set RTC becuase of no fix");
+  }
+}
+
+
+
+// Function never used. For calculating the time(ms) that has elapsed between GPS updates.
+void millisOnesAndTensPlace() {
+  if (GPS.milliseconds % 100 == 0 || GPS.milliseconds == 0) {
+    int temp = GPS.milliseconds / 100;
+    Serial.print(temp);
+
+    Serial.println(gpsMillis);
+  }
+}
+
+
+
 // TODO
 /* If the GPS loses power after getting a fix but the rest of the DAS (TX2, Teensy, HUD) are still powered on,
  * then this code will keep sending CANBUS frames filled with the last data it recieved. Deal with this possible
  * situation by sending out CANBUS frames that are filled with 0's in the data fields. */
-  
-// Teensy should only send out CANBUS frames when new data from the GPS is received.
 
 /* Teensy needs to read GPS data from one unit, send it, then read GPS data from the other (2nd)
  unit and then send that to. Then repeat that process in that order. */
 
  // GPS.milliseconds is always zero. Fix that
-
- // Send GPS.milliseconds in the CANBUS packet. Then make sure gps_lap_timer.cpp reads the packet correctly.

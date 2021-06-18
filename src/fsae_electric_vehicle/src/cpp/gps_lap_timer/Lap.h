@@ -1,3 +1,10 @@
+/************************************************************************************
+ * Unused Lap Class. This defines the structure of a lap. It may be useful if we
+ * decide that storing laps and their corresponding infomation locally on the vehicle
+ * itself like lapEndTime is necessary.
+ ***********************************************************************************/
+
+/* Updated this files header comment above if this class will be used
 #pragma once
 
 #include <cstdint>
@@ -46,4 +53,4 @@ public:
 
 		return (endTime - startTime);
 	}
-};
+};*/
