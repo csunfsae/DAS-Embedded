@@ -15,14 +15,16 @@
 #define DEGTORAD(deg)		(deg*57.29577995f)
 #define D_TO_RADIANS 		(PI/180.0f)
 
-// Represents the elements in the "data" array within the CANData struct
+// Represents the elements in the "timestamp" array within the gps.msg 
 #define GPS_HOURS			0
 #define GPS_MINUTES			1
 #define GPS_SECONDS			2
-#define GPS_FIX      		3
-#define GPS_SPEED    		4
-#define GPS_HEADING_1		5
-#define GPS_HEADING_2		6
+#define GPS_MILLISECONDS    3
+// Represents the elements in the "data" array within the CANData struct
+#define GPS_FIX      	    0
+#define GPS_SPEED    		1
+#define GPS_HEADING_1		2
+#define GPS_HEADING_2		3
 
 #define GPS_ONE_FRAME_ONE_ID	0x35	// Contains data that isnt latitude & longitude. Includes fix, time, heading....
 #define GPS_ONE_FRAME_TWO_ID	0x36	// Contains latitude & longitude data

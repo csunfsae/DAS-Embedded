@@ -6,9 +6,13 @@
  * 
  * The GPS.angle value will not be accurate while moving at slow speeds. This is a promlem with all GPS units
  * 
+ * This program only works correctly when only GPRMC sentences are turned on. See setup() function for more details.
+ * 
  * GPS.milliseconds variable seems to only be updated every 100ms when the GPS is set to update at 10hz. So GPS.milliseconds will only
- * have values that are multiples of 100ms. When the GPS is set at 1hz update rate then it seems like GPS.milliseconds will always be
- * 000 because the nmea string is timestamped at the beginning of every second.
+ * have values that are multiples of 100ms (eg.000, 100, 200,... 900). When the GPS is set at 1hz update rate then it seems like
+ * GPS.milliseconds will always be 000 because the nmea string is timestamped at the beginning of every second. Im not sure how accurate
+ * the milliseconds field in the RMC sentence is. The ms value may be rounded to the nearest hundreth of a second. Or the ms value may
+ * be very accurate and the GPS satellite just sends NMEA sentences exactly every 100 ms.
  * 
  * Connect the GPS Power pin to 5V (stable power is better)
  * Connect the GPS Ground pin to ground
@@ -87,6 +91,9 @@ void setup(void)
   // Uncomment this line to turn on only the "minimum recommended" data
   GPS.sendCommand(PMTK_SET_NMEA_OUTPUT_RMCONLY);
 
+  // Uncomment this line to turn on all NMEA sentences
+  //GPS.sendCommand("b'PMTK314,1,1,1,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0'");
+
   // For parsing data, we don't suggest using anything but either RMC only or RMC+GGA since
   // the parser doesn't care about other sentences at this time
 
@@ -109,6 +116,7 @@ void setup(void)
 // -------------------------------------------------------------------------------------------------------------------
 void loop(void)
 {
+  
   BlinkLED();
 
   PrintRawGpsSentence();
@@ -125,7 +133,7 @@ void loop(void)
     
     if (!GPS.parse(GPS.lastNMEA())) {  // This also sets the newNMEAreceived() flag to false
       Serial.println("Failed to parse lastNMEA\n");
-      return;                         // We can fail to parse a sentence in which case we should just wait for another
+      return;                          // We can fail to parse a sentence in which case we should just wait for another
     }
     
     SyncClockUTC(); // Clock sync is only done once when Teensy starts up and GPS has fix
@@ -152,13 +160,15 @@ void loop(void)
     // Frame 2 includes Latitude and Longitude
     FillCanbusFrameOne(GPS, gpsNum, gpsMillis);  // Fill CANBUS struct with 1st part of GPS1 data that we want to send
     canbus.read(canMsg);          // CANBUS pin will read the canMsg struct just populated with data  
-    Serial.println("____FRAME ONE___ "); CanSniff();               // Print out CAN frame
+    Serial.println("____FRAME ONE___ ");
+    CanSniff();                   // Print out CAN frame
     canbus.write(canMsg);         // Send packet over CANBUS
 
 
     FillCanbusFrameTwo(GPS, gpsNum, gpsMillis);  // Fill CANBUS struct with 2nd part of GPS1 data that we want to send
     canbus.read(canMsg);        // CANBUS pin will read the canMsg struct just populated with data  
-    Serial.println("____FRAME TWO___ "); CanSniff();               // Print out CAN frame
+    Serial.println("____FRAME TWO___ ");
+    CanSniff();                 // Print out CAN frame
     canbus.write(canMsg);       // Send packet over CANBUS
 
     /*
@@ -395,3 +405,6 @@ void millisOnesAndTensPlace() {
  unit and then send that to. Then repeat that process in that order. */
 
  // GPS.milliseconds is always zero. Fix that
+
+ // How do I differentiate between coordinates like 35 Degrees and 16.4735 Minutes, and 35 Degrees and 1.64735 Minutes that come from the GPS?
+ // Maybe there will always be 4 digits after the decimal place in every NMEA string?

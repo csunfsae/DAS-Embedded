@@ -6,6 +6,9 @@
  * necessary then making all of those arguments global variables would be a possible solution, or maybe you can put all of the variables into a struct.
  ************************************************************************************************************************************************************/
 
+
+/* I want to pass an array by reference to gpsCallback. I need to make sure that 	memcpy(&gpsTimestamp + 1 works. */
+
 #include <iostream>
 #include <fstream>
 #include "sioSender.h"
@@ -17,9 +20,10 @@ int main(int argc, char **argv)
 {
   float speedVal = -1.0f, brakePressure = -1.0f, coolantTemp = -1.0f, driveTrain = -1.0f;
   float suspensionFrontLeft = -1.0f, suspensionFrontRight = -1.0f, suspensionRearLeft = -1.0f, suspensionRearRight = -1.0f;
-  float gpsHours = -1.0f, gpsMinutes = -1.0f, gpsSeconds = -1.0f, gpsFix = -1.0f, gpsLatitude = -1.0f, gpsLongitude = -1.0f,
+  float gpsTimestamp[4];
+  float gpsHours = -1.0f, gpsMinutes = -1.0f, gpsSeconds = -1.0f, gpsMilliseconds = 1.0f, gpsFix = -1.0f, gpsLatitude = -1.0f, gpsLongitude = -1.0f,
         gpsSpeed = -1.0f, gpsHeading = -1.0f, gpsLapEndTime = -1.0f, gpsCurrentLapTimer = -1.0f;
-  
+
   //sio::message::list speedData(speedVal);
   //sio::message::list speedData(std::to_string(speedVal));
 
@@ -27,7 +31,7 @@ int main(int argc, char **argv)
   ros::NodeHandle n;
 
   ros::Subscriber speed = n.subscribe<fsae_electric_vehicle::speedometer> ("speedometer", 1000, boost::bind(SpeedCallback, _1, speedVal));
-  ros::Subscriber gps = n.subscribe<fsae_electric_vehicle::gps> ("gps_lap_timer", 1000, boost::bind(GpsCallback, _1, gpsHours, gpsMinutes, gpsSeconds, gpsFix, gpsSpeed, gpsHeading, gpsLapEndTime, gpsCurrentLapTimer));
+  ros::Subscriber gps = n.subscribe<fsae_electric_vehicle::gps> ("gps_lap_timer", 1000, boost::bind(GpsCallback, _1, &gpsTimestamp, gpsFix, gpsSpeed, gpsHeading, gpsLapEndTime, gpsCurrentLapTimer));
   ros::Subscriber bat = n.subscribe<fsae_electric_vehicle::drive_train> ("drivetrain_voltage", 1000, boost::bind(BatteryCallback, _1, driveTrain));
   ros::Subscriber cool = n.subscribe<fsae_electric_vehicle::coolant> ("coolant_temperature", 1000, boost::bind(CoolantCallback, _1, coolantTemp));
   ros::Subscriber brake = n.subscribe<fsae_electric_vehicle::brake_pressure> ("brake_pressure", 1000, boost::bind(BrakeCallback, _1, brakePressure));
@@ -224,13 +228,14 @@ void BatteryCallback(const fsae_electric_vehicle::drive_train::ConstPtr& msg, fl
 
 
 
-void GpsCallback(const fsae_electric_vehicle::gps::ConstPtr& msg, float& gpsHours, float& gpsMinutes, float& gpsSeconds,
+void GpsCallback(const fsae_electric_vehicle::gps::ConstPtr& msg, float (&gpsTimestamp)[4],
                   float& gpsFix, float& gpsSpeed, float& gpsHeading, float& gpsLapEndTime, float& gpsCurrentLapTimer) {
   
   std::lock_guard<std::mutex> lock{dataMutex};
-	memcpy(&gpsHours, &msg->hours, sizeof(gpsHours)+1);
-	memcpy(&gpsMinutes, &msg->minutes, sizeof(gpsMinutes)+1);
-	memcpy(&gpsSeconds, &msg->seconds, sizeof(gpsSeconds)+1);
+	memcpy(&gpsTimestamp, &msg->timestamp[0], sizeof(float)+1);
+	memcpy(&gpsTimestamp + 1, &msg->timestamp[1], sizeof(float)+1);
+	memcpy(&gpsTimestamp + 2, &msg->timestamp[2], sizeof(float)+1);
+  memcpy(&gpsTimestamp + 3, &msg->timestamp[3], sizeof(float)+1); // Make a timestamp array so i dont have to pass in 4 separate values.
 	memcpy(&gpsFix, &msg->fix, sizeof(gpsFix)+1);
   //memcpy(&gpsLatitude, &msg->latitude, sizeof(gpsLatitude)+1);
   //memcpy(&gpsLongitude, &msg->longitude, sizeof(gpsLongitude)+1);

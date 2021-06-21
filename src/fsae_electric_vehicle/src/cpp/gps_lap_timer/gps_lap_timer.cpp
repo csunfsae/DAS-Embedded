@@ -12,13 +12,13 @@
  * getData() runs in less than 0.00006 seconds
  * 
  * I was trying to pass gpsLatitude and gpsLongitude into the gpsCallback function but boost::bind wont take more than 9 params. So to solve
- * that i was thinking of removing Hours, minutes, & seconds from the data field and merging that into one value somehow.
+ * that i was thinking of removing Hours, minutes, & seconds from the data field and merging that into one value somehow. I should merge
+ * thsoe values by puttin them into an array.
  * 
  * What Ive done since last commit:
- * Started to log data to a file in sioSender.  Organized sioSender. sioSender only sends updated fields to the server.
  * 
- * All data except coordinate are logged to file. sioSender sends coordinates to server. We wont be using Lap.h.
- * Teensy syncs its time with GPS. Teensy ready to send time/date info in CANBUS frame timestamp field.
+ * 
+ * 
 *******************************************************************************************************************************************/
 
 /* TIMING CODE
@@ -31,7 +31,7 @@ std::cout << "Duration: " << duration.count() << std::endl;
 #include <cassert>
 #include <math.h>
 #include <array>
-#include <thread>
+//#include <thread>
 #include <chrono>
 #include "RaceTrack.h"
 //#include "Lap.h"
@@ -404,26 +404,27 @@ static point InterpretLatLon(std::optional<CANData> latLonFrame) {
 
 
 
-// Partially fills the struct representing a ROS message with data from first GPS frame. Marks frame as invalid
+// Partially fills the struct representing a ROS message with data from first GPS frame
 static void FillRosMessageWithFrameOneData(fsae_electric_vehicle::gps* gps_lap_timer, std::optional<CANData> frameOneData) { // This just needs an optional candata param not a pair
 	uint16_t heading;
 	
-	gps_lap_timer->hours = frameOneData->data[0];		// Time data
-	gps_lap_timer->minutes = frameOneData->data[1];		// Time data
-	gps_lap_timer->seconds = frameOneData->data[2];		// Time data
-	gps_lap_timer->fix = frameOneData->data[3];
-	gps_lap_timer->speed = frameOneData->data[4];
+	gps_lap_timer->timestamp[0] = frameOneData->timestamp;		// Time data (HOURS portion of timestamp) Convert to float for all timestamp fields
+	gps_lap_timer->timestamp[1] = frameOneData->timestamp;		// Time data ( Minutes portion of timestamp)
+	gps_lap_timer->timestamp[2] = frameOneData->timestamp;		// Time data
+	gps_lap_timer->timestamp[3] = frameOneData->timestamp;		// Time data
+	gps_lap_timer->fix = frameOneData->data[GPS_FIX];
+	gps_lap_timer->speed = frameOneData->data[GPS_SPEED];
 
- 	heading = frameOneData->data[5];
+ 	heading = frameOneData->data[GPS_HEADING_1];
 	heading = heading << 8;
-	gps_lap_timer->heading = heading | frameOneData->data[6];
+	gps_lap_timer->heading = heading | frameOneData->data[GPS_HEADING_2];
 
 	frameOneData->valid = false; // Mark frame as invalid
 }
 
 
 
-// Partially fills the struct representing a ROS message with data from second GPS frame. Marks frame as invalid
+// Partially fills the struct representing a ROS message with data from second GPS frame
 static void FillRosMessageWithFrameTwoData(fsae_electric_vehicle::gps* gps_lap_timer, point coordinates, bool& frameValid) {
 	// Put lat & lon into the struct representing a ROS message
 	gps_lap_timer->latitude = coordinates.x;
@@ -516,8 +517,6 @@ one iteration of the while loop in the teensy code will all have the same timest
 	start line
 	maybe startHeading
 */
-
-// Establish the startLine when the car is driving over 20mph for 5 seconds. That way no physical button is needed for the driver to push.
 
 // Can the private functions in RaceTrack object be defined as const? LineIntersect() const {}
 

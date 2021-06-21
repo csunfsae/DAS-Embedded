@@ -57,7 +57,7 @@ void SuspensionCallback(const fsae_electric_vehicle::suspension::ConstPtr&, floa
 void BatteryCallback(const fsae_electric_vehicle::drive_train::ConstPtr&, float&);
 void CoolantCallback(const fsae_electric_vehicle::coolant::ConstPtr&, float&);
 void BrakeCallback(const fsae_electric_vehicle::brake_pressure::ConstPtr&, float&);
-void GpsCallback(const fsae_electric_vehicle::gps::ConstPtr&, float&, float&, float&, float&, float&, float&, float&, float&);
+void GpsCallback(const fsae_electric_vehicle::gps::ConstPtr&, float (&gpsTimestamp)[4], float&, float&, float&, float&, float&, float&, float&);
 void SpeedCallback(const fsae_electric_vehicle::speedometer::ConstPtr&, float&);
 void ResetValues(float&, float&, float&, float&, float&, float&, float&, float&, float&, float&, float&, float&, float&, float&, float&, float&, float&, float&);
 void LogToFile(std::string, float, std::ofstream&);

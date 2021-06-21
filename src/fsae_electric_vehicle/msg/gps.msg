@@ -1,10 +1,11 @@
 float32 hours
 float32 minutes
 float32 seconds
+float32[] timestamp
 bool fix
-float32 latitude
-float32 longitude
 float32 speed
 float32 heading
-float32 currentLapTimer
+float32 latitude
+float32 longitude
 float32 lapEndTime
+float32 currentLapTimer
