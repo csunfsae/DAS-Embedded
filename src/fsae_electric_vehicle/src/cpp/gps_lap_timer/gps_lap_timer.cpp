@@ -45,6 +45,7 @@ std::cout << "Duration: " << duration.count() << std::endl;
 #define _CRT_SECURE_NO_WARNINGS // For MSVC
 #define LOW_SPEED_DATA_LOGGING 	true
 
+float truncate(float coordinate, int start, int numSplit);
 static void FillRosMessageWithProcessedData(fsae_electric_vehicle::gps*, RaceTrack&);
 static void FillRosMessageWithFrameOneData(fsae_electric_vehicle::gps*, std::optional<CANData>);
 static void FillRosMessageWithFrameTwoData(fsae_electric_vehicle::gps*, point, bool&);
@@ -232,7 +233,18 @@ int main(int argc, char **argv)
   	}
 }
 
+// Responsible for truncating Latitude and Longitude values from DDM to DD format
+float truncate(float coordinate, int start, int numSplit){
+	std::string output = std::to_string(coordinate).substr(start, numSplit+1);
+	
+	if(output.find('.') == std::string::npos || output.back() == '.'){
+		output.pop_back();
+	}
+	
+	return stof(output);
 
+
+}
 
 // Read CANBUS frames from the CANBUS header and store them in the gpsUnitOneData or gpsUnitTwoData pairs. Return true means one pair is full
 static validFrame GetGPSData(CANController* can,
@@ -380,21 +392,30 @@ static void EstablishStartLineSpeedMethod(CANController& can, RaceTrack& RaceTra
 static point InterpretLatLon(std::optional<CANData> latLonFrame) {
 	int32_t latitude;	// latitude format: DDMM.mmmm		This represents Degrees and Minutes. No seconds
 	int32_t longitude;	// longitude format: DDDMM.mmmm
+	int latDegrees, lonDegrees;
+	float latMin, lonMin;
 	point carCoordinates;
 
 	// Pull the latitude & longitude data from the frame	
 	for (int i = 0; i < 4; i++) {
-		latitude = latLonFrame->data[i];
-		latitude = latitude << 8;
+		latitude = latitude << 8 | latLonFrame->data[i];
 	}
-	for (int i = 4; i < 8; i++) {
-		longitude = latLonFrame->data[i];
-		longitude = longitude << 8;
+	for (int i = 0; i < 4; i++) {
+		longitude = longitude << 8 | latLonFrame->data[i];
 	}
 
 	// Interpret the lat & lon data 
 	float flatitude = static_cast<float>(latitude / 10000);
 	float flongitude = static_cast<float>(longitude / 10000);
+	
+	latDegrees = truncate(flatitude, 0, 2);
+	latMin = truncate(flatitude, 2, 6);
+	
+	lonDegrees = truncate(flongitude, 0, 3);
+	lonMin = truncate(flongitude, 3, 6);
+	
+	flatitude = latDegrees + (latMin / 60);
+	flongitude = lonDegrees + (lonMin / 60);
 
 	carCoordinates.x = flatitude;
 	carCoordinates.y = flongitude;
