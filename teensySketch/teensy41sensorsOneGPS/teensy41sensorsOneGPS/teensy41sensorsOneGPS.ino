@@ -186,7 +186,6 @@ void loop(void)
   c = GPS2.read();
   if ((c) && (GPSECHO))
     Serial.write(c);
-
   // A tricky thing here is if we print the NMEA sentence, or data
   // we end up not listening and catching other sentences!
   // So be very wary if using OUTPUT_ALLDATA and trytng to print out data
@@ -210,7 +209,6 @@ void loop(void)
     canbus.read(canMsg);          // CANBUS pin will read the canMsg struct just populated with data  
     //canSniff();               // Print out CAN frame
     canbus.write(canMsg);         // CANBUS pin will send CANBUS packet
-
     fillCanbusFrameTwo(GPS2, gpsNum); // Fill CANBUS struct with 2nd part of GPS2 data that we want to send
     canbus.read(canMsg);        // CANBUS pin will read the canMsg struct just populated with data  
     //canSniff();           // Print out CAN frame

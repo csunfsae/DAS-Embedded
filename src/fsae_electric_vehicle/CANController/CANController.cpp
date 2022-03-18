@@ -92,7 +92,7 @@ void CANController::stop() {
 std::optional<CANData> CANController::getData(uint32_t idFilter, uint32_t idMask) {
   std::lock_guard lock(m_dataMutex);
   for (auto& message : m_dataMap)  {
-    if (message.valid && (message.id & idMask) == idFilter) {
+    if (message.valid){// && (message.id & idMask) == idFilter) {
       auto copy = message;
       message.valid = false;
       return copy;

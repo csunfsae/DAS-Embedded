@@ -9,6 +9,9 @@
 #include "fsae_electric_vehicle/gps.h"
 //#include "/home/nvidia/Desktop/formulaEmbedded/src/fsae_electric_vehicle/socket.io-client-cpp/src/sio_client.h" //Change to directory where the header file is at or it won't compile. Seth & Faizan you can add your include that is specific to your computers directory, just make sure all of the other includes for sio_client.h are commented out.
 #include <sio_client.h>
+#include <hub_connection.h>
+#include <hub_connection_builder.h>
+#include <signalr_value.h>
 #include <json.hpp>
 //#include "/home/btc54/Desktop/formulaEmbedded/src/fsae_electric_vehicle/socket.io-client-cpp/src/sio_client.h" 
 #include <string>
@@ -53,11 +56,11 @@ sio::message::ptr createObject(json o)
 }
 
 sio::message::ptr createObject(json );
-void SuspensionCallback(const fsae_electric_vehicle::suspension::ConstPtr&, float&, float&, float&, float&);
-void BatteryCallback(const fsae_electric_vehicle::drive_train::ConstPtr&, float&);
-void CoolantCallback(const fsae_electric_vehicle::coolant::ConstPtr&, float&);
-void BrakeCallback(const fsae_electric_vehicle::brake_pressure::ConstPtr&, float&);
-void GpsCallback(const fsae_electric_vehicle::gps::ConstPtr&, float (&gpsTimestamp)[4], float&, float&, float&, float&, float&, float&, float&);
-void SpeedCallback(const fsae_electric_vehicle::speedometer::ConstPtr&, float&);
+void SuspensionCallback(const fsae_electric_vehicle::suspension::ConstPtr&);
+void BatteryCallback(const fsae_electric_vehicle::drive_train::ConstPtr&);
+void CoolantCallback(const fsae_electric_vehicle::coolant::ConstPtr&);
+void BrakeCallback(const fsae_electric_vehicle::brake_pressure::ConstPtr&);
+void GpsCallback(const fsae_electric_vehicle::gps::ConstPtr&);
+void SpeedCallback(const fsae_electric_vehicle::speedometer::ConstPtr&);
 void ResetValues(float&, float&, float&, float&, float&, float&, float&, float&, float&, float&, float&, float&, float&, float&, float&, float&, float&, float&);
 void LogToFile(std::string, float, std::ofstream&);

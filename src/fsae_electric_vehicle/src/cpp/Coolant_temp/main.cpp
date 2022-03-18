@@ -25,8 +25,10 @@ int main(int argc, char **argv) {
     if (data.has_value())
       std::memcpy(&lastVal, data->data, 1);
 
-    temperature.temperature = lastVal;
-    coolant_msg.publish(temperature);
+    temperature.temperature = lastVal;//was lastVal
+    //float x = 21.0;
+    //fsae_electric_vehicle::coolant temperature2 = temperature.x;
+    coolant_msg.publish(temperature);//was temperature
     ros::spinOnce();
     loop_rate.sleep();
   }

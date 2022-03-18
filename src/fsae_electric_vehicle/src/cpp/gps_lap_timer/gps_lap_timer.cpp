@@ -113,12 +113,17 @@ int main(int argc, char **argv)
 		// Print out frame
 		std::cout << "UnitOneData:" << std::endl;
 		std::cout << "VALID:" << gpsUnitOneData.first->valid << std::endl;
-		printf("Hours: %u \n", gpsUnitOneData.first->data[GPS_HOURS]);
-		printf("Mins: %u \n", gpsUnitOneData.first->data[GPS_MINUTES]);
-		printf("Secs: %u \n", gpsUnitOneData.first->data[GPS_SECONDS]);
-		printf("FIX: %u \n", gpsUnitOneData.first->data[GPS_FIX]);
-		printf("Speed: %u \n", gpsUnitOneData.first->data[GPS_SPEED]);
-
+		// printf("Hours: %u \n", gpsUnitOneData.first->data[GPS_HOURS]);
+		// printf("Mins: %u \n", gpsUnitOneData.first->data[GPS_MINUTES]);
+		// printf("Secs: %u \n", gpsUnitOneData.first->data[GPS_SECONDS]);
+		// ROS_INFO("Hours: %u \n", gpsUnitOneData.first->data[GPS_HOURS]);
+		// ROS_INFO("Mins: %u \n", gpsUnitOneData.first->data[GPS_MINUTES]);
+		// ROS_INFO("Secs: %u \n", gpsUnitOneData.first->data[GPS_SECONDS]);
+		// printf("FIX: %u \n", gpsUnitOneData.first->data[GPS_FIX]);
+		// ROS_INFO("FIX: %u \n", gpsUnitOneData.first->data[GPS_FIX]);
+		// ROS_INFO("ID: %u \n", gpsUnitOneData.first->data[GPS_ONE_FRAME_ONE_ID]);
+		// printf("Speed: %u \n", gpsUnitOneData.first->data[GPS_SPEED]);
+		ROS_INFO("Speed: %u \n", gpsUnitOneData.first->data[GPS_SPEED]);
 		// Car will stop logging data after low speed for 5 seconds
 		// If lowSpeedTimer > 10s, then wait to cross start line and start timer once crossed
 		if (!LOW_SPEED_DATA_LOGGING) { 																					// If Low Speed Data Logging is turned off
@@ -231,7 +236,7 @@ int main(int argc, char **argv)
 		//ros::spinOnce();
    		loop_rate.sleep();
   	}
-}
+}  
 
 // Responsible for truncating Latitude and Longitude values from DDM to DD format
 float truncate(float coordinate, int start, int numSplit){
@@ -253,11 +258,19 @@ static validFrame GetGPSData(CANController* can,
 	{
 	// Look for frame one (id = 0x35) from GPS unit one
 	std::optional<CANData> canData = can->getData(GPS_ONE_FRAME_ONE_ID, 0x1FFFFFFF);
-	
+	// if(canData.has_value()){
+	// 	CANData tempcanData = canData;
+	// 	for(int i= 0; i<8;i++){
+	// 		ROS_INFO("canData: %u\n", tempcanData.data[i]);
+	// 	}
+	// }
+	//for(int i= 0; i<8;i++){
+			//ROS_INFO("canData: %u\n", canData.data[i]);
+	//}
+	// 
 	if (canData.has_value() && canData->valid) { 	// If frame has been read
 		gpsUnitOneData->first = canData;			// Store frame in gpsUnitOneData
-		ROS_DEBUG("GPS1 F 1 read");
-
+		ROS_INFO("GPS1 F 1 read");
 		canData.reset();							// Clear the data from canData
 
 		std::optional<CANData> canData = can->getData(GPS_ONE_FRAME_TWO_ID, 0x1FFFFFFF); // Look for frame two from GPS unit one
@@ -275,7 +288,7 @@ static validFrame GetGPSData(CANController* can,
 
 	// Look for frame one (id = 0x37) from GPS unit two
 	std::optional<CANData> canData2 = can->getData(GPS_TWO_FRAME_ONE_ID, 0x1FFFFFFF);
-
+	//
 	if (canData.has_value() && canData->valid) {	// If frame has been read
 		gpsUnitTwoData->first = canData2;			// Store frame in gpsUnitTwoData
 		ROS_DEBUG("GPS2 F 1 read");
@@ -307,11 +320,11 @@ static void WaitForGPSFix(CANController* can,
 	{
 	do {
 		std::optional<CANData> canData = can->getData(GPS_ONE_FRAME_ONE_ID, 0x1FFFFFFF); // 2nd param is ID mask
-		if (canData.has_value() && canData->data[GPS_FIX] == 1)
+		if (canData->data[GPS_FIX] == 1) //canData.has_value() && 
 			break; // No need to copy frames into gpsUnitOneData
 
 		std::optional<CANData> canData2 = can->getData(GPS_TWO_FRAME_ONE_ID, 0x1FFFFFFF);
-		if (canData2.has_value() && canData2->data[GPS_FIX] == 1)
+		if (canData2->data[GPS_FIX] == 1) //canData2.has_value() && 
 			break; // No need to copy frames into gpsUnitTwoData
 
 		ROS_INFO_THROTTLE(3, "Waiting for GPS fix!\n");

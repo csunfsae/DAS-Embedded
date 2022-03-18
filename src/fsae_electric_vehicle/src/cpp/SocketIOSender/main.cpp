@@ -12,31 +12,35 @@
 #include <iostream>
 #include <fstream>
 #include "sioSender.h"
+#include <future>
+#include <list>
+#include <stdio.h>
+#include <stdlib.h>
+#include <ctime>
+#include <string> 
 
 #define OUTPUT_DATA_TO_TXT_FILE true  // Do you want to log all data received by this node to a file?
 #define OUTPUT_DATA_TO_SERVER false   // Do you want to send all data received by this node to the server?
 
-int main(int argc, char **argv)
-{
   float speedVal = -1.0f, brakePressure = -1.0f, coolantTemp = -1.0f, driveTrain = -1.0f;
   float suspensionFrontLeft = -1.0f, suspensionFrontRight = -1.0f, suspensionRearLeft = -1.0f, suspensionRearRight = -1.0f;
   float gpsTimestamp[4];
-  float gpsHours = -1.0f, gpsMinutes = -1.0f, gpsSeconds = -1.0f, gpsMilliseconds = 1.0f, gpsFix = -1.0f, gpsLatitude = -1.0f, gpsLongitude = -1.0f,
-        gpsSpeed = -1.0f, gpsHeading = -1.0f, gpsLapEndTime = -1.0f, gpsCurrentLapTimer = -1.0f;
+  float gpsHours = -1.0f, gpsMinutes = -1.0f, gpsSeconds = -1.0f, gpsMilliseconds = 1.0f, gpsFix = -1.0f, gpsLatitude = -1.0f, gpsLongitude = -1.0f, gpsSpeed = -1.0f, gpsHeading = -1.0f, gpsLapEndTime = -1.0f, gpsCurrentLapTimer = -1.0f;
 
+int main(int argc, char **argv)
+{
   //sio::message::list speedData(speedVal);
   //sio::message::list speedData(std::to_string(speedVal));
 
   ros::init(argc, argv, "SocketIOSender");
   ros::NodeHandle n;
 
-  ros::Subscriber speed = n.subscribe<fsae_electric_vehicle::speedometer> ("speedometer", 1000, boost::bind(SpeedCallback, _1, speedVal));
-  ros::Subscriber gps = n.subscribe<fsae_electric_vehicle::gps> ("gps_lap_timer", 1000, boost::bind(GpsCallback, _1, &gpsTimestamp, gpsFix, gpsSpeed, gpsHeading, gpsLapEndTime, gpsCurrentLapTimer));
-  ros::Subscriber bat = n.subscribe<fsae_electric_vehicle::drive_train> ("drivetrain_voltage", 1000, boost::bind(BatteryCallback, _1, driveTrain));
-  ros::Subscriber cool = n.subscribe<fsae_electric_vehicle::coolant> ("coolant_temperature", 1000, boost::bind(CoolantCallback, _1, coolantTemp));
-  ros::Subscriber brake = n.subscribe<fsae_electric_vehicle::brake_pressure> ("brake_pressure", 1000, boost::bind(BrakeCallback, _1, brakePressure));
-  ros::Subscriber susp = n.subscribe<fsae_electric_vehicle::suspension>("suspension", 1000, boost::bind(SuspensionCallback, _1, suspensionFrontLeft,
-                                                                                            suspensionFrontRight, suspensionRearLeft, suspensionRearRight));
+  ros::Subscriber speed = n.subscribe<fsae_electric_vehicle::speedometer> ("speedometer", 1000, SpeedCallback);
+  ros::Subscriber gps = n.subscribe<fsae_electric_vehicle::gps> ("gps_lap_timer", 1000, GpsCallback);
+  ros::Subscriber bat = n.subscribe<fsae_electric_vehicle::drive_train> ("drivetrain_voltage", 1000, BatteryCallback);
+  ros::Subscriber cool = n.subscribe<fsae_electric_vehicle::coolant> ("coolant_temperature", 1000, CoolantCallback);
+  ros::Subscriber brake = n.subscribe<fsae_electric_vehicle::brake_pressure> ("brake_pressure", 1000, BrakeCallback);
+  ros::Subscriber susp = n.subscribe<fsae_electric_vehicle::suspension>("suspension", 1000, SuspensionCallback);
 
   sio::client h;
   if (OUTPUT_DATA_TO_SERVER) {
@@ -53,7 +57,7 @@ int main(int argc, char **argv)
     if (!collectedData.is_open()) {
       ROS_WARN("Could not open file for data logging");
     } else {
-      ROS_INFO("Opened file successfully!");
+      ROS_INFO("File successfully opened!");
     }
   }
 
@@ -66,11 +70,19 @@ int main(int argc, char **argv)
     //json parseLocation = json::parse(ifs);
 
     // Check each float to see if its == -1. If it is -1 then send it to server, else dont send it.
-    if (speedVal != -1.0f) {
-      if (OUTPUT_DATA_TO_SERVER)
-        h.socket()->emit("speedometer", sio::double_message::create(speedVal));
-      if (OUTPUT_DATA_TO_TXT_FILE)
-        LogToFile("Speed", speedVal, collectedData);
+    // if (speedVal != -1.0f) {
+    //   if (OUTPUT_DATA_TO_SERVER)
+    //     h.socket()->emit("speedometer", sio::double_message::create(speedVal));
+    //   if (OUTPUT_DATA_TO_TXT_FILE)
+    //     LogToFile("Speed", speedVal, collectedData);
+    // }
+    srand((unsigned)time(0));    
+
+    for (int i = 0; i < 100; i++) {
+        speedVal = 1 + (rand() % 50);
+        
+
+        callSignalRConnection(speedVal);
     }
 
     if (brakePressure != -1.0f) {
@@ -80,7 +92,8 @@ int main(int argc, char **argv)
         LogToFile("Speed", speedVal, collectedData);
     }
 
-    if (coolantTemp != -1.0f) {
+    //if (coolantTemp != -1.0f) {
+    if(coolantTemp != -1.0f){
       if (OUTPUT_DATA_TO_SERVER)
         h.socket()->emit("coolantTemp", sio::double_message::create(coolantTemp));
       if (OUTPUT_DATA_TO_TXT_FILE)
@@ -178,10 +191,11 @@ int main(int argc, char **argv)
     }
 
     sio::message::ptr object = createObject(carLocation);
-    if (OUTPUT_DATA_TO_SERVER)
+    if (OUTPUT_DATA_TO_SERVER) {
       carLocation["latitude"] = gpsLatitude;
       carLocation["longitude"] = gpsLongitude;
       h.socket()->emit("carLocation", object);
+    }
     if (OUTPUT_DATA_TO_TXT_FILE) {
       LogToFile("Car Latitude", gpsLatitude, collectedData);
       LogToFile("Car Longitude", gpsLongitude, collectedData);
@@ -200,36 +214,35 @@ int main(int argc, char **argv)
 
 
 
-void SpeedCallback(const fsae_electric_vehicle::speedometer::ConstPtr& msg, float& speedVal) {
+void SpeedCallback(const fsae_electric_vehicle::speedometer::ConstPtr& msg) {
   std::lock_guard<std::mutex> lock{dataMutex};
   memcpy(&speedVal, &msg->speed, sizeof(speedVal)+1);
 }
 
 
 
-void BrakeCallback(const fsae_electric_vehicle::brake_pressure::ConstPtr& msg, float& brakePressure) { 
+void BrakeCallback(const fsae_electric_vehicle::brake_pressure::ConstPtr& msg) { 
   std::lock_guard<std::mutex> lock{dataMutex};
 	memcpy(&brakePressure, &msg->pressure, sizeof(brakePressure)+1);
 }
 
 
 
-void CoolantCallback(const fsae_electric_vehicle::coolant::ConstPtr& msg, float& coolantTemp) {
+void CoolantCallback(const fsae_electric_vehicle::coolant::ConstPtr& msg) {
   std::lock_guard<std::mutex> lock{dataMutex};
 	memcpy(&coolantTemp, &msg->temperature, sizeof(coolantTemp)+1);
 }
 
 
 
-void BatteryCallback(const fsae_electric_vehicle::drive_train::ConstPtr& msg, float& driveTrain) {
+void BatteryCallback(const fsae_electric_vehicle::drive_train::ConstPtr& msg) {
   std::lock_guard<std::mutex> lock{dataMutex};
 	memcpy(&driveTrain, &msg->voltage, sizeof(driveTrain)+1);
 }
 
 
 
-void GpsCallback(const fsae_electric_vehicle::gps::ConstPtr& msg, float (&gpsTimestamp)[4],
-                  float& gpsFix, float& gpsSpeed, float& gpsHeading, float& gpsLapEndTime, float& gpsCurrentLapTimer) {
+void GpsCallback(const fsae_electric_vehicle::gps::ConstPtr& msg) {
   
   std::lock_guard<std::mutex> lock{dataMutex};
 	memcpy(&gpsTimestamp, &msg->timestamp[0], sizeof(float)+1);
@@ -247,8 +260,7 @@ void GpsCallback(const fsae_electric_vehicle::gps::ConstPtr& msg, float (&gpsTim
 
 
 
-void SuspensionCallback(const fsae_electric_vehicle::suspension::ConstPtr& msg,
-                        float& suspensionFrontLeft, float& suspensionFrontRight, float& suspensionRearLeft, float& suspensionRearRight) {
+void SuspensionCallback(const fsae_electric_vehicle::suspension::ConstPtr& msg) {
 
   std::lock_guard<std::mutex> lock{dataMutex};
 	memcpy(&suspensionFrontLeft, &msg->frontLeft, sizeof(suspensionFrontLeft)+1);
@@ -276,4 +288,36 @@ void LogToFile(std::string text, float value, std::ofstream& collectedData) {
   } else {
     collectedData << text << ": " << value << std::endl;
   }
+}
+
+void callSignalRConnection(std::string speed) {
+    std::promise<void> start_task;
+    signalr::hub_connection connection = signalr::hub_connection_builder::create("https://csun-fsae.azurewebsites.net/racehub").build();
+
+    connection.on("Speedometer", [](const std::vector<signalr::value>& m)
+        {
+            std::cout << m[0].as_string() << std::endl;
+        });
+
+    connection.start([&start_task](std::exception_ptr exception) {
+        start_task.set_value();
+        });
+
+    start_task.get_future().get();
+
+    std::promise<void> send_task;
+
+    std::vector<signalr::value> args{ speed };
+    connection.invoke("Speedometer", args, [&send_task](const signalr::value& value, std::exception_ptr exception) {
+        send_task.set_value();
+        });
+
+    send_task.get_future().get();
+
+    std::promise<void> stop_task;
+    connection.stop([&stop_task](std::exception_ptr exception) {
+        stop_task.set_value();
+        });
+
+    stop_task.get_future().get();
 }

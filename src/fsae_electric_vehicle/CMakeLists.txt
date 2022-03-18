@@ -38,28 +38,32 @@ catkin_package(
 	INCLUDE_DIRS socket.io-client-cpp
 	INCLUDE_DIRS json-develop
 	INCLUDE_DIRS CANController
-	CATKIN_DEPENDS message_runtime)
+ 	INCLUDE_DIRS SignalR-Client-Cpp-main
+	CATKIN_DEPENDS message_runtime
+)
 
 include_directories(
+
   socket.io-client-cpp
   json-develop
   json-develop/include/nlohmann
   json-develop/include
   CANController
+  SignalR-Client-Cpp-main
   ${catkin_INCLUDE_DIRS}
   ${Boost_INCLUDE_DIRS}
 )
 
-add_library(${PROJECT_NAME} socket.io-client-cpp/src/sio_client.cpp socket.io-client-cpp/src/sio_socket.cpp socket.io-client-cpp/src/internal/sio_client_impl.cpp socket.io-client-cpp/src/internal/sio_packet.cpp json-develop/include/nlohmann CANController/CANController.cpp)
+add_library(${PROJECT_NAME} SignalR-Client-Cpp-main/ socket.io-client-cpp/src/sio_client.cpp socket.io-client-cpp/src/sio_socket.cpp socket.io-client-cpp/src/internal/sio_client_impl.cpp socket.io-client-cpp/src/internal/sio_packet.cpp json-develop/include/nlohmann CANController/CANController.cpp)
 
 target_include_directories(${PROJECT_NAME} PUBLIC 
+    SignalR-Client-Cpp-main/
     socket.io-client-cpp/src 
     socket.io-client-cpp/lib/websocketpp 
     socket.io-client-cpp/lib/rapidjson/include
     json-develop/include/nlohmann
     CANController
 )
-
 
 
 add_executable(DriveTrain src/cpp/drivetrain/drive_train.cpp CANController/CANController.cpp)
