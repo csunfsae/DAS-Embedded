@@ -4,7 +4,7 @@
 
 #pragma once
 
-#include "../include/signalrclient/scheduler.h"
+#include "include/signalrclient/scheduler.h"
 #include <thread>
 #include <mutex>
 #include <vector>

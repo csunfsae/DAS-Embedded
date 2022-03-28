@@ -26,7 +26,37 @@
   float suspensionFrontLeft = -1.0f, suspensionFrontRight = -1.0f, suspensionRearLeft = -1.0f, suspensionRearRight = -1.0f;
   float gpsTimestamp[4];
   float gpsHours = -1.0f, gpsMinutes = -1.0f, gpsSeconds = -1.0f, gpsMilliseconds = 1.0f, gpsFix = -1.0f, gpsLatitude = -1.0f, gpsLongitude = -1.0f, gpsSpeed = -1.0f, gpsHeading = -1.0f, gpsLapEndTime = -1.0f, gpsCurrentLapTimer = -1.0f;
+void callSignalRConnection(std::string speed) {
+    std::promise<void> start_task;
+    signalr::hub_connection connection = signalr::hub_connection_builder::create("https://csun-fsae.azurewebsites.net/racehub").build();
 
+    connection.on("Speedometer", [](const std::vector<signalr::value>& m)
+        {
+            std::cout << m[0].as_string() << std::endl;
+        });
+
+    connection.start([&start_task](std::exception_ptr exception) {
+        start_task.set_value();
+        });
+
+    start_task.get_future().get();
+
+    std::promise<void> send_task;
+
+    std::vector<signalr::value> args{ speed };
+    connection.invoke("Speedometer", args, [&send_task](const signalr::value& value, std::exception_ptr exception) {
+        send_task.set_value();
+        });
+
+    send_task.get_future().get();
+
+    std::promise<void> stop_task;
+    connection.stop([&stop_task](std::exception_ptr exception) {
+        stop_task.set_value();
+        });
+
+    stop_task.get_future().get();
+}
 int main(int argc, char **argv)
 {
   //sio::message::list speedData(speedVal);
@@ -82,7 +112,7 @@ int main(int argc, char **argv)
         speedVal = 1 + (rand() % 50);
         
 
-        callSignalRConnection(speedVal);
+        callSignalRConnection(std::to_string(speedVal));
     }
 
     if (brakePressure != -1.0f) {
@@ -290,34 +320,3 @@ void LogToFile(std::string text, float value, std::ofstream& collectedData) {
   }
 }
 
-void callSignalRConnection(std::string speed) {
-    std::promise<void> start_task;
-    signalr::hub_connection connection = signalr::hub_connection_builder::create("https://csun-fsae.azurewebsites.net/racehub").build();
-
-    connection.on("Speedometer", [](const std::vector<signalr::value>& m)
-        {
-            std::cout << m[0].as_string() << std::endl;
-        });
-
-    connection.start([&start_task](std::exception_ptr exception) {
-        start_task.set_value();
-        });
-
-    start_task.get_future().get();
-
-    std::promise<void> send_task;
-
-    std::vector<signalr::value> args{ speed };
-    connection.invoke("Speedometer", args, [&send_task](const signalr::value& value, std::exception_ptr exception) {
-        send_task.set_value();
-        });
-
-    send_task.get_future().get();
-
-    std::promise<void> stop_task;
-    connection.stop([&stop_task](std::exception_ptr exception) {
-        stop_task.set_value();
-        });
-
-    stop_task.get_future().get();
-}

@@ -54,10 +54,14 @@ include_directories(
   ${Boost_INCLUDE_DIRS}
 )
 
-add_library(${PROJECT_NAME} SignalR-Client-Cpp-main/ socket.io-client-cpp/src/sio_client.cpp socket.io-client-cpp/src/sio_socket.cpp socket.io-client-cpp/src/internal/sio_client_impl.cpp socket.io-client-cpp/src/internal/sio_packet.cpp json-develop/include/nlohmann CANController/CANController.cpp)
+add_library(${PROJECT_NAME} SignalR-Client-Cpp-main/src/signalrclient/hub_connection.cpp SignalR-Client-Cpp-main/src/signalrclient/signalr_value.cpp SignalR-Client-Cpp-main/src/signalrclient/hub_connection_builder.cpp SignalR-Client-Cpp-main/src/signalrclient/hub_connection_impl.cpp SignalR-Client-Cpp-main/src/signalrclient/callback_manager.cpp SignalR-Client-Cpp-main/src/signalrclient/connection_impl.cpp SignalR-Client-Cpp-main/src/signalrclient/signalr_client_config.cpp SignalR-Client-Cpp-main/src/signalrclient/logger.cpp SignalR-Client-Cpp-main/src/signalrclient/cancellation_token_source.cpp SignalR-Client-Cpp-main/src/signalrclient/transport_factory.cpp SignalR-Client-Cpp-main/src/signalrclient/signalr_default_scheduler.cpp SignalR-Client-Cpp-main/src/signalrclient/json_hub_protocol.cpp SignalR-Client-Cpp-main/src/signalrclient/url_builder.cpp SignalR-Client-Cpp-main/src/signalrclient/trace_log_writer.cpp SignalR-Client-Cpp-main/src/signalrclient/negotiate.cpp SignalR-Client-Cpp-main/src/signalrclient/handshake_protocol.cpp SignalR-Client-Cpp-main/src/signalrclient/jsoncpp.cpp SignalR-Client-Cpp-main/src/signalrclient/uri_builder.cpp SignalR-Client-Cpp-main/src/signalrclient/json_helpers.cpp SignalR-Client-Cpp-main/src/signalrclient/uri.cpp SignalR-Client-Cpp-main/src/signalrclient/cancellation_token.cpp SignalR-Client-Cpp-main/src/signalrclient/websocket_transport.cpp SignalR-Client-Cpp-main/src/signalrclient/transport.cpp
+
+
+socket.io-client-cpp/src/sio_client.cpp socket.io-client-cpp/src/sio_socket.cpp socket.io-client-cpp/src/internal/sio_client_impl.cpp socket.io-client-cpp/src/internal/sio_packet.cpp json-develop/include/nlohmann CANController/CANController.cpp)
 
 target_include_directories(${PROJECT_NAME} PUBLIC 
-    SignalR-Client-Cpp-main/
+    SignalR-Client-Cpp-main/src/signalrclient
+    #SignalR-Client-Cpp-main/include/signalrclient/
     socket.io-client-cpp/src 
     socket.io-client-cpp/lib/websocketpp 
     socket.io-client-cpp/lib/rapidjson/include
